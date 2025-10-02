@@ -16,6 +16,22 @@
         // IMPORTANT: Set Firestore logging level for debugging.
         setLogLevel('Debug');
 
+        // --- GLOBAL CONFIGURATION INJECTION (CRITICAL FOR VERCEL) ---
+
+        // In the Canvas environment, __firebase_config and __initial_auth_token are provided.
+        // In Vercel, you must manually define the firebaseConfig object here.
+
+        const firebaseConfig = {
+          apiKey: "AIzaSyDK_RPUQaQ86dzRhOOrrzRvRcG5pMyHR_E",
+          authDomain: "sanskrit-chat.firebaseapp.com",
+          projectId: "sanskrit-chat",
+          storageBucket: "sanskrit-chat.firebasestorage.app",
+          messagingSenderId: "328437332405",
+          appId: "1:328437332405:web:ffd31f848b2351501fc1fc",
+          measurementId: "G-X14R907GQB"
+        };
+        // -------------------------------------------------------------
+
         // --- Global Firebase and App Variables ---
         window.firebaseApp = null;
         window.db = null;
@@ -26,12 +42,16 @@
 
         // Configuration variables provided by the environment
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'sanskrit-chat-default';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-        // FIX: The reference error occurred here. We must use the environment variable name (__initial_auth_token).
+        
+        // Use the hardcoded config if __firebase_config is not defined (i.e., on Vercel)
+        const firebaseConfig = typeof __firebase_config !== 'undefined' 
+                               ? JSON.parse(__firebase_config) 
+                               : VERIFICATION_FIREBASE_CONFIG;
+        
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null; 
         
         // --- API CONFIGURATION (UPDATED FOR SECURE PROXY) ---
-        const PROXY_TRANSLATION_ENDPOINT = "/api/translate"; // We will call this local Vercel endpoint
+        const PROXY_TRANSLATION_ENDPOINT = "/api/translate"; 
         
         // --- Utility Functions ---
 
@@ -126,11 +146,18 @@
             document.getElementById('loading-status').textContent = 'Connecting...';
             document.getElementById('loading-status').className = 'px-3 py-1 bg-gray-400 text-white rounded-full text-xs font-semibold';
 
-            // Check if Firebase config is missing 
-            if (Object.keys(firebaseConfig).length === 0) {
+            // Check if Firebase config is missing or empty
+            if (Object.keys(firebaseConfig).length === 0 || !firebaseConfig.projectId) {
                 document.getElementById('loading-status').textContent = 'Disconnected';
                 document.getElementById('loading-status').className = 'px-3 py-1 bg-red-600 text-white rounded-full text-xs font-semibold';
-                showModal('Configuration Error', 'Firebase configuration is missing. Cannot initialize the application.', 'error');
+                
+                // Show a specific error message for Vercel deployment
+                if (!window.location.host.includes('vercel.app')) {
+                    showModal('Configuration Error', 'Firebase configuration is missing. Cannot initialize the application.', 'error');
+                } else {
+                    showModal('Vercel Setup Required', 'The Firebase configuration is missing. You MUST paste your Firebase project credentials into the VERIFICATION_FIREBASE_CONFIG block in index.html to deploy on Vercel.', 'error');
+                }
+                
                 return;
             }
 
