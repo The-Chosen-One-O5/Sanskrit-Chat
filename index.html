@@ -90,11 +90,6 @@
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, collection, addDoc, onSnapshot, serverTimestamp, setLogLevel, query, orderBy, limit, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Global variables provided by the environment
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-sanskrit-chat-app';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { /* Fallback config */ };
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
         // Define the set of icons to be rendered, as required by createIcons
         const lucideIcons = { Search, MessageSquare, Plus, LogIn, Send, Copy, AlertTriangle, Check };
 
@@ -102,6 +97,35 @@
         const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
         const GROQ_API_KEY = "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"; 
         const GROQ_MODEL_ID = "openai/gpt-oss-120b";
+        
+        // Define the explicit Firebase config provided by the user for a robust fallback
+        const USER_PROVIDED_FIREBASE_CONFIG = {
+            apiKey: "AIzaSyDK_RPUQaQ86dzRhOOrrzRvRcG5pMyHR_E",
+            authDomain: "sanskrit-chat.firebaseapp.com",
+            projectId: "sanskrit-chat",
+            storageBucket: "sanskrit-chat.firebasestorage.app",
+            messagingSenderId: "328437332405",
+            appId: "1:328437332405:web:ffd31f848b2351501fc1fc",
+            measurementId: "G-X14R907GQB"
+        };
+
+        // Global variables provided by the environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-sanskrit-chat-app';
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        
+        // FIX: Ensure firebaseConfig is always defined with the project ID by using a fallback.
+        let firebaseConfig = USER_PROVIDED_FIREBASE_CONFIG;
+        if (typeof __firebase_config !== 'undefined' && __firebase_config.trim() !== '') {
+            try {
+                // Prioritize the environment config if available and valid
+                const envConfig = JSON.parse(__firebase_config);
+                if (envConfig.projectId) {
+                    firebaseConfig = envConfig;
+                }
+            } catch (e) {
+                console.warn("Could not parse __firebase_config, using hardcoded fallback.");
+            }
+        }
         
         let db;
         let auth;
