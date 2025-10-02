@@ -94,9 +94,9 @@
         const lucideIcons = { Search, MessageSquare, Plus, LogIn, Send, Copy, AlertTriangle, Check };
 
         // Constants and State
-        const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
-        const GROQ_API_KEY = "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"; 
-        const GROQ_MODEL_ID = "openai/gpt-oss-120b";
+        // NEW: This is the local endpoint for the Vercel serverless function
+        const TRANSLATION_ENDPOINT = "/api/translate"; 
+        // NOTE: GROQ_API_KEY is removed from client-side code for security.
         
         // Define the explicit Firebase config provided by the user for a robust fallback
         const USER_PROVIDED_FIREBASE_CONFIG = {
@@ -113,7 +113,7 @@
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-sanskrit-chat-app';
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
         
-        // FIX: Ensure firebaseConfig is always defined with the project ID by using a fallback.
+        // Ensure firebaseConfig is always defined with the project ID by using a fallback.
         let firebaseConfig = USER_PROVIDED_FIREBASE_CONFIG;
         if (typeof __firebase_config !== 'undefined' && __firebase_config.trim() !== '') {
             try {
@@ -349,7 +349,7 @@
             });
         }
 
-        // --- GROQ TRANSLATION API ---
+        // --- SECURE TRANSLATION API CALL ---
 
         async function callGroqApi(prompt) {
             const maxRetries = 3;
@@ -357,37 +357,23 @@
             
             for (let attempt = 0; attempt < maxRetries; attempt++) {
                 try {
-                    const payload = {
-                        model: GROQ_MODEL_ID,
-                        messages: [
-                            {
-                                role: "system",
-                                content: "You are an expert Sanskrit language translator. Translate the user's input (which may be English or Hinglish) into pure, correct Sanskrit using the Devanagari script. Do not include any explanation, commentary, or extra text, only the translated Sanskrit phrase."
-                            },
-                            {
-                                role: "user",
-                                content: prompt
-                            }
-                        ],
-                        temperature: 0.1,
-                        max_tokens: 100
-                    };
-
-                    const response = await fetch(GROQ_API_URL, {
+                    // Call the local Vercel Serverless Function endpoint
+                    const response = await fetch(TRANSLATION_ENDPOINT, {
                         method: 'POST',
                         headers: { 
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${GROQ_API_KEY}` 
+                            'Content-Type': 'application/json'
                         },
-                        body: JSON.stringify(payload)
+                        // Pass only the data needed for translation
+                        body: JSON.stringify({ prompt: prompt })
                     });
 
                     if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
+                        const errorData = await response.json();
+                        throw new Error(`API Endpoint error! Status: ${response.status}. Message: ${errorData.error}`);
                     }
 
                     const result = await response.json();
-                    const translatedText = result.choices?.[0]?.message?.content?.trim();
+                    const translatedText = result.sanskritText;
                     
                     if (!translatedText) {
                         throw new Error("API response was empty or malformed.");
@@ -413,13 +399,13 @@
             let success = false;
 
             try {
-                // 1. Translate the message
+                // 1. Translate the message via the secure endpoint
                 sanskritText = await callGroqApi(originalText);
                 success = true;
                 
             } catch (e) {
                 console.error("Translation error:", e);
-                showError("Sanskrit translation failed. Check API connection.");
+                showError(`Sanskrit translation failed: ${e.message}`);
                 // Use a fallback text if translation fails
                 sanskritText = `[Translation Error] ${originalText}`; 
             }
