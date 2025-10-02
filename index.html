@@ -43,6 +43,7 @@
         // Configuration variables provided by the environment
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'sanskrit-chat-default';
         
+        // --- FIX: We now define firebaseConfig only once using a ternary operator ---
         // Use the hardcoded config if __firebase_config is not defined (i.e., on Vercel)
         const firebaseConfig = typeof __firebase_config !== 'undefined' 
                                ? JSON.parse(__firebase_config) 
