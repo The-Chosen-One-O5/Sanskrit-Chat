@@ -1,0 +1,14 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/$1"
+    }
+  ],
+  "builds": [
+    {
+      "src": "api/translate.js",
+      "use": "@vercel/node"
+    }
+  ]
+}
