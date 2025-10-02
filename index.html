@@ -19,7 +19,7 @@
         // --- GLOBAL CONFIGURATION INJECTION (CRITICAL FOR VERCEL) ---
 
         // In the Canvas environment, __firebase_config and __initial_auth_token are provided.
-        // In Vercel, you must manually define the firebaseConfig object here.
+        // In Vercel, you must manually define the VERIFICATION_FIREBASE_CONFIG object here.
 
         const firebaseConfig = {
           apiKey: "AIzaSyDK_RPUQaQ86dzRhOOrrzRvRcG5pMyHR_E",
@@ -31,7 +31,7 @@
           measurementId: "G-X14R907GQB"
         };
         // -------------------------------------------------------------
-
+        
         // --- Global Firebase and App Variables ---
         window.firebaseApp = null;
         window.db = null;
@@ -39,16 +39,16 @@
         window.userId = null;
         window.userName = null; 
         window.currentRoomCode = null;
-
-        // Configuration variables provided by the environment
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'sanskrit-chat-default';
         
-        // --- FIXED DEFINITION: We use the ternary operator directly to define firebaseConfig ---
+        // --- FIXED: All configuration variables defined cleanly at the top ---
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'sanskrit-chat-default';
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null; 
+        
+        // Use the hardcoded config if __firebase_config is not defined (i.e., on Vercel)
         const firebaseConfig = typeof __firebase_config !== 'undefined' 
                                ? JSON.parse(__firebase_config) 
                                : VERIFICATION_FIREBASE_CONFIG;
-        
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null; 
+        // -------------------------------------------------------------------
         
         // --- API CONFIGURATION (UPDATED FOR SECURE PROXY) ---
         const PROXY_TRANSLATION_ENDPOINT = "/api/translate"; 
@@ -536,7 +536,6 @@
                     colors: {
                         'primary-yellow': '#FBBF24', /* Tailwind Yellow-500 */
                         'secondary-orange': '#F97316', /* Tailwind Orange-600 */
-                        'primary-blue': '#3B82F6', /* Tailwind Blue-500 */
                     },
                     fontFamily: {
                         sans: ['Inter', 'sans-serif'],
