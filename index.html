@@ -99,12 +99,13 @@
         // --- FIREBASE SDKs ---
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        // NOTE: We need deleteDoc for room deletion
         import { getFirestore, doc, collection, addDoc, onSnapshot, serverTimestamp, query, orderBy, getDoc, setDoc, where, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- CONSTANTS ---
         // Vercel Serverless Function Endpoint for Translation
         const TRANSLATION_ENDPOINT = "/api/translate"; 
+        // 24 hours in milliseconds for inactivity check
+        const INACTIVITY_LIMIT_MS = 24 * 60 * 60 * 1000; 
         
         // Firebase Config Fallback (User provided)
         const USER_PROVIDED_FIREBASE_CONFIG = {
@@ -240,6 +241,20 @@
                 hideLoading();
             }
         }
+        
+        // --- INACTIVITY CHECK & CLEANUP ---
+
+        async function deleteExpiredRoom(roomCode) {
+            const roomRef = doc(db, `artifacts/${appId}/public/data/sanskrit_rooms`, roomCode);
+            try {
+                await deleteDoc(roomRef);
+                console.log(`Room ${roomCode} deleted due to inactivity.`);
+            } catch (e) {
+                // Ignore permission denied if the room was already deleted by another client
+                console.warn(`Failed to delete expired room ${roomCode}:`, e.message);
+            }
+        }
+
 
         // --- REAL-TIME LISTENERS & ROOM LOGIC ---
 
@@ -251,14 +266,29 @@
             if (!db) return;
 
             const roomsRef = collection(db, `artifacts/${appId}/public/data/sanskrit_rooms`);
+            // Query only for public rooms. We must sort client-side.
             const publicRoomsQuery = query(roomsRef, where("isPublic", "==", true)); 
 
             unsubscribePublicRooms = onSnapshot(publicRoomsQuery, (snapshot) => {
                 publicRooms = [];
+                const now = Date.now();
+
                 snapshot.forEach(doc => {
-                    publicRooms.push({ id: doc.id, ...doc.data() });
+                    const room = { id: doc.id, ...doc.data() };
+                    
+                    // Client-Side Inactivity Check: Check if room is older than 24 hours (INACTIVITY_LIMIT_MS)
+                    const createdAtTime = room.createdAt?.toDate().getTime() || 0;
+                    const isExpired = now - createdAtTime > INACTIVITY_LIMIT_MS;
+
+                    if (isExpired) {
+                        // Trigger deletion if the room is too old, but don't add it to the list
+                        deleteExpiredRoom(room.id); 
+                    } else {
+                        publicRooms.push(room);
+                    }
                 });
                 
+                // Client-side sort by creation time (newest first)
                 publicRooms.sort((a, b) => {
                     const timeA = a.createdAt?.toDate().getTime() || 0;
                     const timeB = b.createdAt?.toDate().getTime() || 0;
@@ -295,7 +325,6 @@
             }, (error) => {
                 console.error("Error listening to messages:", error);
                 showError("Real-time connection lost. Check your network.");
-                // If the room no longer exists (e.g., deleted by host)
                 if (error.code === 'not-found' || error.code === 'permission-denied') {
                     alertMessage("The room you were in was closed by the host or no longer exists.", 'info');
                     switchState(STATE.ROOM_HUB);
@@ -387,8 +416,19 @@
                     return;
                 }
                 
+                // Check for expiration immediately upon attempting to join
+                const roomData = roomSnap.data();
+                const createdAtTime = roomData.createdAt?.toDate().getTime() || 0;
+                const isExpired = Date.now() - createdAtTime > INACTIVITY_LIMIT_MS;
+
+                if (isExpired) {
+                    await deleteExpiredRoom(code);
+                    showError(`Room '${code}' was too old and has been deleted.`);
+                    return;
+                }
+
                 currentRoomCode = code;
-                currentRoomData = roomSnap.data(); // Store joined room data
+                currentRoomData = roomData; // Store joined room data
                 switchState(STATE.CHAT);
                 listenToChat(code);
                 sendSystemMessage(code, 'JOINED');
@@ -412,11 +452,8 @@
             const roomRef = doc(db, `artifacts/${appId}/public/data/sanskrit_rooms`, roomCodeToDelete);
 
             try {
-                // Deleting the room document. Note: This does NOT automatically delete subcollections (messages)
-                // but since the chat listens only to the main room's existence, this is sufficient to stop chat activity.
                 await deleteDoc(roomRef);
                 
-                // Navigate back to the hub
                 currentRoomCode = '';
                 currentRoomData = null;
                 messages = [];
