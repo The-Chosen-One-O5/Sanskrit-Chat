@@ -4,9 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sanskrit Universal Chat</title>
-    <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Lucide Icons and Firebase are now initialized in the main module script below -->
     <style>
         /* Custom styles for aesthetic appeal and responsiveness */
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
@@ -18,13 +16,13 @@
         }
         body {
             font-family: 'Inter', sans-serif;
-            background-color: #f7fafc; /* Light gray background */
+            background-color: #f7fafc;
         }
         .app-container {
             min-height: 100vh;
             display: flex;
             justify-content: center;
-            align-items: flex-start; /* Align to top for better mobile view */
+            align-items: flex-start;
             padding-top: 2rem;
             padding-bottom: 2rem;
         }
@@ -35,11 +33,9 @@
             width: 500px;
         }
         .chat-message-container {
-            /* Scrollable area */
-            max-height: 70vh;
+            max-height: 60vh; /* Adjusted for better visibility */
             overflow-y: auto;
         }
-        /* Custom scrollbar for aesthetics */
         .chat-message-container::-webkit-scrollbar {
             width: 8px;
         }
@@ -47,17 +43,21 @@
             background-color: var(--color-primary);
             border-radius: 4px;
         }
+        .room-list-item {
+            cursor: pointer;
+        }
+        .room-list-item:hover {
+            background-color: #fffbeb; /* Light yellow hover */
+        }
     </style>
 </head>
 <body class="app-container">
 
     <div id="app" class="card rounded-xl p-6 transition-all duration-300">
-        <!-- Application State Renders Here -->
         <h1 class="text-3xl font-extrabold text-black mb-6 text-center">
-            <span class="text-yellow-600">Sanskrit</span> Chat
+            <span class="text-yellow-600">Sanskrit</span> Universal Chat
         </h1>
 
-        <!-- Loading Indicator -->
         <div id="loading-overlay" class="hidden fixed inset-0 bg-white bg-opacity-75 flex justify-center items-center z-50">
             <div class="text-center">
                 <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-yellow-500 mx-auto"></div>
@@ -65,40 +65,31 @@
             </div>
         </div>
         
-        <!-- Error Message Box -->
-        <div id="error-message" class="hidden mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-lg" role="alert">
+        <div id="alert-message-box" class="hidden mb-4 p-3 border-l-4 rounded-r-lg" role="alert">
             <div class="flex items-center">
-                <i data-lucide="alert-triangle" class="w-5 h-5 mr-2 text-red-500"></i>
-                <span id="error-text" class="font-medium"></span>
+                <span id="alert-icon"></span>
+                <span id="alert-text" class="font-medium ml-2"></span>
             </div>
         </div>
 
-        <!-- Render based on appState (NAME_INPUT, ROOM_SELECTION, JOIN_INPUT, CHAT) -->
-        <div id="lobby-view"></div>
-        <div id="join-input-view" class="hidden"></div>
-        <div id="chat-view" class="hidden"></div>
-
+        <div id="main-view-container"></div>
     </div>
 
-    <!-- Firebase SDKs and Main Application Logic -->
     <script type="module">
-        // --- LUCIDE ICONS (Now using esm.sh for better compatibility) ---
-        import { createIcons, Search, MessageSquare, Plus, LogIn, Send, Copy, AlertTriangle, Check } from 'https://esm.sh/lucide@latest';
+        // --- LUCIDE ICONS ---
+        import { createIcons, Search, MessageSquare, Plus, LogIn, Send, Copy, AlertTriangle, Check, List, Zap } from 'https://esm.sh/lucide@latest';
+        const lucideIcons = { Search, MessageSquare, Plus, LogIn, Send, Copy, AlertTriangle, Check, List, Zap };
 
         // --- FIREBASE SDKs ---
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, collection, addDoc, onSnapshot, serverTimestamp, setLogLevel, query, orderBy, limit, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, collection, addDoc, onSnapshot, serverTimestamp, query, orderBy, getDoc, setDoc, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Define the set of icons to be rendered, as required by createIcons
-        const lucideIcons = { Search, MessageSquare, Plus, LogIn, Send, Copy, AlertTriangle, Check };
-
-        // Constants and State
-        // NEW: This is the local endpoint for the Vercel serverless function
+        // --- CONSTANTS ---
+        // Vercel Serverless Function Endpoint for Translation
         const TRANSLATION_ENDPOINT = "/api/translate"; 
-        // NOTE: GROQ_API_KEY is removed from client-side code for security.
         
-        // Define the explicit Firebase config provided by the user for a robust fallback
+        // Firebase Config Fallback (User provided)
         const USER_PROVIDED_FIREBASE_CONFIG = {
             apiKey: "AIzaSyDK_RPUQaQ86dzRhOOrrzRvRcG5pMyHR_E",
             authDomain: "sanskrit-chat.firebaseapp.com",
@@ -108,91 +99,95 @@
             appId: "1:328437332405:web:ffd31f848b2351501fc1fc",
             measurementId: "G-X14R907GQB"
         };
+        
+        // --- APPLICATION STATE CONSTANTS ---
+        const STATE = {
+            NAME_INPUT: 'NAME_INPUT',
+            ROOM_HUB: 'ROOM_HUB',
+            CREATE_ROOM_FORM: 'CREATE_ROOM_FORM',
+            JOIN_CODE_FORM: 'JOIN_CODE_FORM',
+            CHAT: 'CHAT'
+        };
 
-        // Global variables provided by the environment
+        // --- GLOBAL VARIABLES ---
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-sanskrit-chat-app';
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-        
-        // Ensure firebaseConfig is always defined with the project ID by using a fallback.
-        let firebaseConfig = USER_PROVIDED_FIREBASE_CONFIG;
-        if (typeof __firebase_config !== 'undefined' && __firebase_config.trim() !== '') {
-            try {
-                // Prioritize the environment config if available and valid
-                const envConfig = JSON.parse(__firebase_config);
-                if (envConfig.projectId) {
-                    firebaseConfig = envConfig;
-                }
-            } catch (e) {
-                console.warn("Could not parse __firebase_config, using hardcoded fallback.");
-            }
-        }
         
         let db;
         let auth;
         let userId = null;
-        let userName = ''; // New state for user's chosen name
-        let appState = 'NAME_INPUT'; // Updated initial state
+        let userName = '';
+        let currentState = STATE.NAME_INPUT;
         let currentRoomCode = '';
         let messages = [];
-        let isAuthReady = false;
+        let publicRooms = [];
+        let unsubscribePublicRooms = null; 
+        let unsubscribeChat = null; 
 
         // DOM elements
-        const lobbyView = document.getElementById('lobby-view');
-        const joinInputView = document.getElementById('join-input-view');
-        const chatView = document.getElementById('chat-view');
-        const appContainer = document.getElementById('app');
-        const errorMessage = document.getElementById('error-message');
-        const errorText = document.getElementById('error-text');
+        const mainViewContainer = document.getElementById('main-view-container');
         const loadingOverlay = document.getElementById('loading-overlay');
+        const alertMessageBox = document.getElementById('alert-message-box');
+        const alertText = document.getElementById('alert-text');
+        const alertIcon = document.getElementById('alert-icon');
 
-        // Utility Functions
+
+        // --- UTILITY FUNCTIONS ---
+
         function showLoading() { loadingOverlay.classList.remove('hidden'); }
         function hideLoading() { loadingOverlay.classList.add('hidden'); }
 
-        function showError(message) {
-            errorText.textContent = message;
-            errorMessage.classList.remove('hidden');
+        function alertMessage(message, type = 'error') {
+            const classMap = {
+                'error': { bg: 'bg-red-100', border: 'border-red-500', text: 'text-red-700', icon: 'alert-triangle' },
+                'info': { bg: 'bg-blue-100', border: 'border-blue-500', text: 'text-blue-700', icon: 'list' },
+            };
+            
+            const config = classMap[type] || classMap['error'];
+            
+            alertMessageBox.className = `mb-4 p-3 border-l-4 ${config.bg} ${config.border} ${config.text} rounded-r-lg`;
+            alertText.textContent = message;
+            alertIcon.innerHTML = `<i data-lucide="${config.icon}" class="w-5 h-5 mr-2"></i>`;
+            alertMessageBox.classList.remove('hidden');
+            
+            // Re-render icons for the alert box
+            createIcons({ icons: lucideIcons, attrs: { color: config.text.replace('text-', '') }});
+
             setTimeout(() => {
-                errorMessage.classList.add('hidden');
+                alertMessageBox.classList.add('hidden');
             }, 5000);
         }
-
-        function renderState() {
-            lobbyView.innerHTML = '';
-            joinInputView.innerHTML = '';
-            chatView.innerHTML = '';
-
-            lobbyView.classList.add('hidden');
-            joinInputView.classList.add('hidden');
-            chatView.classList.add('hidden');
-
-            switch (appState) {
-                case 'NAME_INPUT': // New state: Capture user name
-                    renderNameInput();
-                    lobbyView.classList.remove('hidden');
-                    break;
-                case 'ROOM_SELECTION': // New state: Show create/join buttons
-                    renderRoomSelection();
-                    lobbyView.classList.remove('hidden'); // Reusing lobby view for simplicity
-                    break;
-                case 'JOIN_INPUT':
-                    renderJoinInput();
-                    joinInputView.classList.remove('hidden');
-                    break;
-                case 'CHAT':
-                    renderChat();
-                    chatView.classList.remove('hidden');
-                    break;
-            }
-            // Re-run icon initialization with the imported icons object
-            createIcons({ icons: lucideIcons });
+        
+        // Simplified check for the app container to handle error display logic
+        function showError(message) {
+            alertMessage(message, 'error');
         }
 
-        // --- AUTH & FIREBASE SETUP ---
+        function switchState(newState) {
+            console.log(`Switching state: ${currentState} -> ${newState}`);
+            currentState = newState;
+            renderState();
+        }
+        
+        // --- FIREBASE INITIALIZATION AND AUTH ---
 
         async function initializeFirebase() {
+            showLoading();
+            
+            // FIX: Ensure firebaseConfig is always defined with the project ID by using a fallback.
+            let firebaseConfig = USER_PROVIDED_FIREBASE_CONFIG;
+            if (typeof __firebase_config !== 'undefined' && __firebase_config.trim() !== '') {
+                try {
+                    const envConfig = JSON.parse(__firebase_config);
+                    if (envConfig.projectId) {
+                        firebaseConfig = envConfig;
+                    }
+                } catch (e) {
+                    console.warn("Could not parse __firebase_config, using hardcoded fallback.");
+                }
+            }
+            
             try {
-                // setLogLevel('debug'); // Uncomment for verbose firebase logging
                 const app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
                 auth = getAuth(app);
@@ -202,41 +197,110 @@
                         if (user) {
                             userId = user.uid;
                         } else {
-                            userId = crypto.randomUUID(); // Fallback for unauthenticated but running (will use custom token later)
-                        }
-
-                        // Try custom sign-in first, then anonymous
-                        if (initialAuthToken) {
+                            // First time or signed out, attempt anonymous sign-in
                             try {
-                                await signInWithCustomToken(auth, initialAuthToken);
+                                if (initialAuthToken) {
+                                    await signInWithCustomToken(auth, initialAuthToken);
+                                } else {
+                                    await signInAnonymously(auth);
+                                }
                                 userId = auth.currentUser.uid;
                             } catch (e) {
-                                console.error("Custom token sign-in failed, falling back to anonymous:", e);
-                                await signInAnonymously(auth);
-                                userId = auth.currentUser.uid;
+                                console.error("Anonymous/Custom sign-in failed:", e);
+                                showError("Authentication failed. Cannot connect to chat.");
+                                return;
                             }
-                        } else {
-                            await signInAnonymously(auth);
-                            userId = auth.currentUser.uid;
                         }
-                        
-                        isAuthReady = true;
+                        console.log("Authentication successful. User ID:", userId);
                         resolve();
                     });
                 });
-                renderState(); // Initial render after auth is ready
-
+                
+                // FINAL FIX: Render the initial state ONLY after successful authentication
+                switchState(STATE.NAME_INPUT);
+                
             } catch (error) {
-                console.error("Error initializing Firebase:", error);
-                showError("Failed to connect to the database. Please check your configuration.");
-                // Ensure icons are created even on error to render the alert-triangle icon
-                createIcons({ icons: lucideIcons });
+                console.error("Fatal Error initializing Firebase:", error);
+                showError("Fatal Error: Could not initialize app or connect to database.");
+            } finally {
+                hideLoading();
             }
         }
 
+        // --- REAL-TIME LISTENERS & ROOM LOGIC ---
+
+        function setupPublicRoomListener() {
+            if (unsubscribePublicRooms) {
+                unsubscribePublicRooms();
+                unsubscribePublicRooms = null;
+            }
+            if (!db) return;
+
+            const roomsRef = collection(db, `artifacts/${appId}/public/data/sanskrit_rooms`);
+            // FIX: Remove orderBy to avoid requiring an index, filter only by where clause.
+            const publicRoomsQuery = query(roomsRef, where("isPublic", "==", true)); 
+
+            unsubscribePublicRooms = onSnapshot(publicRoomsQuery, (snapshot) => {
+                publicRooms = [];
+                snapshot.forEach(doc => {
+                    publicRooms.push({ id: doc.id, ...doc.data() });
+                });
+                
+                // FIX: Sort the rooms client-side by createdAt descending to maintain order
+                publicRooms.sort((a, b) => {
+                    // Convert Firestore Timestamps to milliseconds for comparison, handling potential nulls
+                    const timeA = a.createdAt?.toDate().getTime() || 0;
+                    const timeB = b.createdAt?.toDate().getTime() || 0;
+                    return timeB - timeA;
+                });
+
+                if (currentState === STATE.ROOM_HUB) {
+                    renderRoomHub();
+                }
+            }, (error) => {
+                console.error("Error listening to public rooms:", error);
+                alertMessage("Failed to load public rooms list.", 'info');
+            });
+        }
+        
+        function listenToChat(roomCode) {
+            if (unsubscribeChat) {
+                unsubscribeChat();
+                unsubscribeChat = null;
+            }
+            if (!db || !roomCode) return;
+
+            const messagesRef = collection(db, `artifacts/${appId}/public/data/sanskrit_rooms`, roomCode, 'messages');
+            const messagesQuery = query(messagesRef, orderBy('timestamp', 'asc'));
+
+            unsubscribeChat = onSnapshot(messagesQuery, (snapshot) => {
+                messages = [];
+                snapshot.forEach(doc => {
+                    messages.push({ id: doc.id, ...doc.data() });
+                });
+                if (currentState === STATE.CHAT) {
+                    renderChatMessages();
+                }
+            }, (error) => {
+                console.error("Error listening to messages:", error);
+                showError("Real-time connection lost. Check your network.");
+            });
+        }
+        
+        function cleanupListeners() {
+            if (unsubscribePublicRooms) {
+                unsubscribePublicRooms();
+            }
+            if (unsubscribeChat) {
+                unsubscribeChat();
+            }
+            unsubscribePublicRooms = null;
+            unsubscribeChat = null;
+        }
+
+
         // --- SYSTEM MESSAGE SENDER ---
         async function sendSystemMessage(roomCode, type) {
-            // type will be 'JOINED' or 'LEFT'
             try {
                 if (!db || !userName) throw new Error("Database or user name not ready.");
                 const messagesRef = collection(db, `artifacts/${appId}/public/data/sanskrit_rooms`, roomCode, 'messages');
@@ -252,19 +316,9 @@
             }
         }
 
+        // --- ROOM ACTIONS ---
 
-        // --- ROOM MANAGEMENT ---
-
-        function generateRoomCode() {
-            const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-            let code = '';
-            for (let i = 0; i < 6; i++) {
-                code += characters.charAt(Math.floor(Math.random() * characters.length));
-            }
-            return code;
-        }
-
-        async function createRoom() {
+        async function createRoom(roomName, isPublic) {
             showLoading();
             const newCode = generateRoomCode();
             const roomRef = doc(db, `artifacts/${appId}/public/data/sanskrit_rooms`, newCode);
@@ -272,24 +326,25 @@
                 const roomSnap = await getDoc(roomRef);
                 if (roomSnap.exists()) {
                     hideLoading();
-                    return createRoom(); 
+                    return createRoom(roomName, isPublic); // Try again with a new code
                 }
 
                 await setDoc(roomRef, { 
                     createdAt: serverTimestamp(), 
                     hostId: userId,
-                    hostName: userName // Store host name
+                    hostName: userName,
+                    roomName: roomName,
+                    isPublic: isPublic
                 });
                 
                 currentRoomCode = newCode;
-                appState = 'CHAT';
-                renderState();
+                switchState(STATE.CHAT);
                 listenToChat(newCode);
-                sendSystemMessage(newCode, 'JOINED'); // Send join message
+                sendSystemMessage(newCode, 'JOINED');
 
             } catch (e) {
                 console.error("Error creating room:", e);
-                showError("Failed to create room. Please try again.");
+                showError("Failed to create room. Database error.");
             } finally {
                 hideLoading();
             }
@@ -313,10 +368,9 @@
                 }
                 
                 currentRoomCode = code;
-                appState = 'CHAT';
-                renderState();
+                switchState(STATE.CHAT);
                 listenToChat(code);
-                sendSystemMessage(code, 'JOINED'); // Send join message
+                sendSystemMessage(code, 'JOINED');
 
             } catch (e) {
                 console.error("Error joining room:", e);
@@ -325,51 +379,33 @@
                 hideLoading();
             }
         }
-
-        function listenToChat(roomCode) {
-            if (!db || !userId) {
-                showError("Database or User not ready.");
-                return;
+        
+        function generateRoomCode() {
+            const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            let code = '';
+            for (let i = 0; i < 6; i++) {
+                code += characters.charAt(Math.floor(Math.random() * characters.length));
             }
-
-            const messagesRef = collection(db, `artifacts/${appId}/public/data/sanskrit_rooms`, roomCode, 'messages');
-            const messagesQuery = query(messagesRef, orderBy('timestamp', 'asc'));
-
-            // Set up real-time listener
-            onSnapshot(messagesQuery, (snapshot) => {
-                const newMessages = [];
-                snapshot.forEach(doc => {
-                    newMessages.push({ id: doc.id, ...doc.data() });
-                });
-                messages = newMessages;
-                renderChatMessages();
-            }, (error) => {
-                console.error("Error listening to messages:", error);
-                showError("Real-time connection lost. Check your network.");
-            });
+            return code;
         }
-
-        // --- SECURE TRANSLATION API CALL ---
-
+        
+        // --- TRANSLATION LOGIC (Calls secure endpoint) ---
+        
         async function callGroqApi(prompt) {
             const maxRetries = 3;
             let lastError = null;
             
             for (let attempt = 0; attempt < maxRetries; attempt++) {
                 try {
-                    // Call the local Vercel Serverless Function endpoint
                     const response = await fetch(TRANSLATION_ENDPOINT, {
                         method: 'POST',
-                        headers: { 
-                            'Content-Type': 'application/json'
-                        },
-                        // Pass only the data needed for translation
+                        headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ prompt: prompt })
                     });
 
                     if (!response.ok) {
                         const errorData = await response.json();
-                        throw new Error(`API Endpoint error! Status: ${response.status}. Message: ${errorData.error}`);
+                        throw new Error(`Endpoint error! Status: ${response.status}. Message: ${errorData.error}`);
                     }
 
                     const result = await response.json();
@@ -382,12 +418,10 @@
 
                 } catch (e) {
                     lastError = e;
-                    console.warn(`Attempt ${attempt + 1} failed:`, e);
-                    // Exponential backoff
+                    console.warn(`Attempt ${attempt + 1} failed:`, e.message);
                     await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
                 }
             }
-
             throw new Error(`Translation failed after ${maxRetries} attempts. ${lastError.message}`);
         }
 
@@ -396,36 +430,30 @@
 
             showLoading();
             let sanskritText = "Translation failed.";
-            let success = false;
 
             try {
-                // 1. Translate the message via the secure endpoint
                 sanskritText = await callGroqApi(originalText);
-                success = true;
                 
             } catch (e) {
                 console.error("Translation error:", e);
                 showError(`Sanskrit translation failed: ${e.message}`);
-                // Use a fallback text if translation fails
                 sanskritText = `[Translation Error] ${originalText}`; 
             }
 
-            // 2. Send the message to Firestore
             try {
                 if (!db || !currentRoomCode) throw new Error("Chat not initialized.");
-
                 const messagesRef = collection(db, `artifacts/${appId}/public/data/sanskrit_rooms`, currentRoomCode, 'messages');
 
                 await addDoc(messagesRef, {
                     originalText: originalText,
                     sanskritText: sanskritText,
                     userId: userId,
-                    userName: userName, // Including user name
-                    type: 'user', // Defining message type
+                    userName: userName,
+                    type: 'user',
                     timestamp: serverTimestamp()
                 });
 
-                document.getElementById('message-input').value = ''; // Clear input
+                document.getElementById('message-input').value = '';
                 
             } catch (e) {
                 console.error("Failed to send message:", e);
@@ -435,11 +463,42 @@
             }
         }
 
+        // --- UI RENDERERS ---
 
-        // --- RENDERING FUNCTIONS ---
-        
+        function renderState() {
+            mainViewContainer.innerHTML = '';
+            
+            // Clean up listeners when leaving CHAT or ROOM_HUB
+            if (currentState !== STATE.ROOM_HUB) {
+                cleanupListeners();
+            }
+
+            switch (currentState) {
+                case STATE.NAME_INPUT:
+                    renderNameInput();
+                    break;
+                case STATE.ROOM_HUB:
+                    renderRoomHub();
+                    setupPublicRoomListener();
+                    break;
+                case STATE.CREATE_ROOM_FORM:
+                    renderCreateRoomForm();
+                    break;
+                case STATE.JOIN_CODE_FORM:
+                    renderJoinCodeForm();
+                    break;
+                case STATE.CHAT:
+                    renderChat();
+                    break;
+                default:
+                    renderNameInput();
+            }
+            // Ensure icons are rendered after new HTML is injected
+            createIcons({ icons: lucideIcons });
+        }
+
         function renderNameInput() {
-            lobbyView.innerHTML = `
+            mainViewContainer.innerHTML = `
                 <h2 class="text-xl font-bold mb-4 text-center">Welcome to Sanskrit Chat!</h2>
                 <p class="text-sm text-gray-600 mb-6 text-center">First, enter your name to begin.</p>
                 <input id="user-name-input" type="text" placeholder="Your Name" maxlength="20" class="w-full p-3 border-2 border-gray-300 rounded-lg focus:ring-yellow-500 focus:border-yellow-500 text-lg mb-4">
@@ -450,62 +509,116 @@
             document.getElementById('set-name-btn').addEventListener('click', () => {
                 const name = document.getElementById('user-name-input').value.trim();
                 if (name) {
-                    userName = name.substring(0, 20); // Truncate name to 20 chars
-                    appState = 'ROOM_SELECTION';
-                    renderState();
+                    userName = name.substring(0, 20);
+                    switchState(STATE.ROOM_HUB);
                 } else {
                     showError("Please enter a name.");
                 }
             });
         }
+        
+        function renderRoomHub() {
+            const listItems = publicRooms.length > 0
+                ? publicRooms.map(room => `
+                    <div class="room-list-item p-3 border-b border-gray-200 flex justify-between items-center bg-white shadow-sm rounded-lg mb-2" data-room-code="${room.id}">
+                        <div>
+                            <p class="font-semibold text-gray-800">${room.roomName || 'Untitled Public Room'}</p>
+                            <p class="text-xs text-gray-500">Host: ${room.hostName || 'Anonymous'}</p>
+                        </div>
+                        <button class="bg-blue-500 text-white text-xs font-semibold px-3 py-1 rounded-full hover:bg-blue-600">
+                            Join
+                        </button>
+                    </div>
+                `).join('')
+                : '<p class="text-center text-gray-500 py-4">No public rooms available. Be the first to create one!</p>';
 
-        function renderRoomSelection() {
-            lobbyView.innerHTML = `
-                <h2 class="text-xl font-bold mb-4 text-center">Hello, ${userName}!</h2>
-                <p class="text-sm text-gray-600 mb-6 text-center">Select an option to begin your communication journey to Sanskrit.</p>
-                <div class="space-y-4">
-                    <button id="create-room-btn" class="w-full flex items-center justify-center bg-yellow-500 hover:bg-yellow-600 text-black font-bold py-3 px-4 rounded-lg shadow-lg transition duration-200 transform hover:scale-[1.02]">
+            mainViewContainer.innerHTML = `
+                <h2 class="text-xl font-bold mb-4 text-center">Welcome to the Hub, ${userName}!</h2>
+                <p class="text-sm text-gray-600 mb-6 text-center">Browse public rooms or create your own.</p>
+                
+                <div class="bg-gray-50 p-3 rounded-lg max-h-60 overflow-y-auto mb-6 border border-gray-200">
+                    <h3 class="text-lg font-semibold mb-3 flex items-center text-gray-700 border-b pb-2">
+                        <i data-lucide="list" class="w-5 h-5 mr-2 text-yellow-600"></i>
+                        Active Public Rooms
+                    </h3>
+                    <div id="public-room-list">
+                        ${listItems}
+                    </div>
+                </div>
+
+                <div class="space-y-3">
+                    <button id="create-room-nav-btn" class="w-full flex items-center justify-center bg-yellow-500 hover:bg-yellow-600 text-black font-bold py-3 px-4 rounded-lg shadow-lg transition duration-200">
                         <i data-lucide="plus" class="w-5 h-5 mr-2"></i>
-                        Create a Room
+                        Create a New Room
                     </button>
-                    <button id="join-input-btn" class="w-full flex items-center justify-center bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 px-4 rounded-lg shadow-lg transition duration-200 transform hover:scale-[1.02]">
+                    <button id="join-code-nav-btn" class="w-full flex items-center justify-center bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 px-4 rounded-lg shadow-lg transition duration-200">
                         <i data-lucide="log-in" class="w-5 h-5 mr-2"></i>
-                        Join a Room
+                        Join Private by Code
                     </button>
                 </div>
             `;
-            document.getElementById('create-room-btn').addEventListener('click', createRoom);
-            document.getElementById('join-input-btn').addEventListener('click', () => {
-                appState = 'JOIN_INPUT';
-                renderState();
+            
+            document.getElementById('create-room-nav-btn').addEventListener('click', () => switchState(STATE.CREATE_ROOM_FORM));
+            document.getElementById('join-code-nav-btn').addEventListener('click', () => switchState(STATE.JOIN_CODE_FORM));
+
+            document.querySelectorAll('.room-list-item').forEach(item => {
+                item.addEventListener('click', (e) => {
+                    const roomCode = item.getAttribute('data-room-code');
+                    joinRoom(roomCode);
+                });
             });
         }
 
-        function renderJoinInput() {
-            joinInputView.innerHTML = `
-                <h2 class="text-xl font-bold mb-4 text-center">Enter Room Code</h2>
+        function renderCreateRoomForm() {
+            mainViewContainer.innerHTML = `
+                <h2 class="text-xl font-bold mb-6 text-center">Create Your Room</h2>
+
+                <label for="room-name-input" class="block text-sm font-medium text-gray-700 mb-1">Room Name</label>
+                <input id="room-name-input" type="text" placeholder="e.g., Sanskrit Practice Group" maxlength="30" class="w-full p-3 border-2 border-gray-300 rounded-lg focus:ring-yellow-500 focus:border-yellow-500 text-lg mb-4">
+                
+                <div class="flex items-center justify-between bg-gray-50 p-3 rounded-lg mb-6 border border-gray-200">
+                    <label for="is-public-toggle" class="text-sm font-medium text-gray-700">Make this room public (Listed in Hub)</label>
+                    <input type="checkbox" id="is-public-toggle" class="form-checkbox h-5 w-5 text-yellow-500 rounded border-gray-300 focus:ring-yellow-500" checked>
+                </div>
+
+                <button id="create-room-action-btn" class="w-full flex items-center justify-center bg-yellow-500 hover:bg-yellow-600 text-black font-bold py-3 px-4 rounded-lg shadow-lg transition duration-200 transform hover:scale-[1.02]">
+                    <i data-lucide="zap" class="w-5 h-5 mr-2"></i>
+                    Start Chat & Get Code
+                </button>
+                <button id="back-to-hub-btn" class="w-full mt-3 text-sm text-gray-500 hover:text-gray-700 p-2">
+                    Back to Room Hub
+                </button>
+            `;
+            document.getElementById('create-room-action-btn').addEventListener('click', () => {
+                const roomName = document.getElementById('room-name-input').value.trim() || 'Untitled Room';
+                const isPublic = document.getElementById('is-public-toggle').checked;
+                createRoom(roomName, isPublic);
+            });
+            document.getElementById('back-to-hub-btn').addEventListener('click', () => switchState(STATE.ROOM_HUB));
+        }
+
+        function renderJoinCodeForm() {
+             mainViewContainer.innerHTML = `
+                <h2 class="text-xl font-bold mb-4 text-center">Join a Private Room</h2>
                 <p class="text-sm text-gray-600 mb-6 text-center">Enter the 6-character code shared by the host.</p>
-                <input id="room-code-input" type="text" placeholder="e.g., ABC123" maxlength="6" class="w-full p-3 border-2 border-gray-300 rounded-lg focus:ring-yellow-500 focus:border-yellow-500 text-lg uppercase mb-4 text-center tracking-widest font-mono">
-                <button id="join-room-action-btn" class="w-full flex items-center justify-center bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-4 rounded-lg shadow-lg transition duration-200 transform hover:scale-[1.02]">
-                    <i data-lucide="search" class="w-5 h-5 mr-2"></i>
+                <input id="room-code-input" type="text" placeholder="e.g., ABC123" maxlength="6" class="w-full p-3 border-2 border-gray-300 rounded-lg focus:ring-orange-500 focus:border-orange-500 text-lg uppercase mb-4 text-center tracking-widest font-mono">
+                <button id="join-room-action-btn" class="w-full flex items-center justify-center bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 px-4 rounded-lg shadow-lg transition duration-200 transform hover:scale-[1.02]">
+                    <i data-lucide="log-in" class="w-5 h-5 mr-2"></i>
                     Connect to Chat
                 </button>
-                <button id="back-to-room-selection-btn" class="w-full mt-3 text-sm text-gray-500 hover:text-gray-700 p-2">
-                    Back to Options
+                <button id="back-to-hub-btn" class="w-full mt-3 text-sm text-gray-500 hover:text-gray-700 p-2">
+                    Back to Room Hub
                 </button>
             `;
             document.getElementById('join-room-action-btn').addEventListener('click', () => {
                 const code = document.getElementById('room-code-input').value;
                 joinRoom(code);
             });
-            document.getElementById('back-to-room-selection-btn').addEventListener('click', () => {
-                appState = 'ROOM_SELECTION';
-                renderState();
-            });
+            document.getElementById('back-to-hub-btn').addEventListener('click', () => switchState(STATE.ROOM_HUB));
         }
 
         function renderChat() {
-            chatView.innerHTML = `
+            mainViewContainer.innerHTML = `
                 <div class="flex items-center justify-between mb-4 pb-2 border-b-2 border-yellow-500">
                     <h2 class="text-2xl font-bold text-gray-800 flex items-center">
                         <i data-lucide="message-square" class="w-6 h-6 mr-2 text-orange-500"></i>
@@ -517,18 +630,15 @@
                 </div>
 
                 <div class="mb-4 p-3 bg-blue-100 border-l-4 border-blue-500 text-blue-800 text-sm rounded-r-lg shadow-sm">
-                    <p class="font-bold">You are chatting as: ${userName}</p>
+                    <p class="font-bold">Chatting as: ${userName}</p>
                 </div>
 
-                <!-- Message List -->
                 <div id="messages-list" class="chat-message-container space-y-4 p-2">
-                    <!-- Messages will be rendered here -->
                     <div class="text-center text-gray-500 pt-8" id="empty-state">
                         Start your conversation in English or Hinglish!
                     </div>
                 </div>
 
-                <!-- Message Input -->
                 <div class="mt-6">
                     <form id="message-form" class="flex">
                         <input type="text" id="message-input" placeholder="Type your English/Hinglish message..." class="flex-grow p-3 border border-gray-300 rounded-l-lg focus:ring-yellow-500 focus:border-yellow-500" required>
@@ -539,14 +649,11 @@
                 </div>
             `;
             
-            // Note: The call to createIcons is now in renderState to process these new elements.
-
             document.getElementById('leave-room-btn').addEventListener('click', () => {
                 sendSystemMessage(currentRoomCode, 'LEFT').then(() => {
                     currentRoomCode = '';
                     messages = [];
-                    appState = 'ROOM_SELECTION'; // Go back to room selection
-                    renderState();
+                    switchState(STATE.ROOM_HUB);
                 });
             });
 
@@ -556,23 +663,21 @@
                 translateAndSendMessage(input.value);
             });
             
-            renderChatMessages(); // Initial render of messages
+            renderChatMessages(); 
         }
 
         function renderChatMessages() {
             const list = document.getElementById('messages-list');
-            if (!list) return; // Guard for non-chat state
+            if (!list) return;
 
             if (messages.length === 0) {
                 document.getElementById('empty-state')?.classList.remove('hidden');
-                list.innerHTML = `<div class="text-center text-gray-500 pt-8" id="empty-state">Start your conversation in English or Hinglish!</div>`;
                 return;
             }
             document.getElementById('empty-state')?.classList.add('hidden');
 
-
             list.innerHTML = messages.map(msg => {
-                // 1. Handle system messages (Join/Leave)
+                // 1. System messages
                 if (msg.type === 'system') {
                     return `
                         <div class="text-center my-3">
@@ -583,30 +688,24 @@
                     `;
                 }
 
-                // 2. Handle user messages
+                // 2. User messages
                 const isMine = msg.userId === userId;
-                
-                // Display name or a truncated ID as fallback
                 const displayName = isMine ? 'You' : msg.userName || 'Guest'; 
                 const userColor = isMine ? 'text-orange-500' : 'text-blue-500';
 
                 return `
                     <div class="flex ${isMine ? 'justify-end' : 'justify-start'}">
                         <div class="max-w-xs md:max-w-md w-fit p-3 rounded-xl shadow-md ${isMine ? 'bg-orange-100 border-2 border-orange-300' : 'bg-white border-2 border-gray-200'}">
-                            <!-- User Name/ID -->
                             <p class="text-xs font-semibold mb-1 ${userColor}">${displayName}</p>
 
-                            <!-- Original Message (English/Hinglish) -->
                             <p class="text-sm text-gray-700 italic border-b pb-1 mb-1">
                                 ${msg.originalText}
                             </p>
 
-                            <!-- Translated Sanskrit Message (Primary Focus) -->
                             <p class="text-xl font-extrabold text-black">
                                 ${msg.sanskritText}
                             </p>
                             
-                            <!-- Timestamp -->
                             <p class="text-[10px] text-gray-400 mt-1 text-right">
                                 ${msg.timestamp ? new Date(msg.timestamp.toDate()).toLocaleTimeString() : '...'}
                             </p>
@@ -619,44 +718,8 @@
             list.scrollTop = list.scrollHeight;
         }
 
-        function copyToClipboard(text, buttonId) {
-            const button = document.getElementById(buttonId);
-            const originalText = button.innerHTML;
-            
-            // Use execCommand for broader compatibility in iframes
-            const textarea = document.createElement('textarea');
-            textarea.value = text;
-            textarea.style.position = 'fixed'; // Ensure it's not visible
-            document.body.appendChild(textarea);
-            textarea.select();
-            
-            try {
-                document.execCommand('copy');
-                button.innerHTML = '<i data-lucide="check" class="w-4 h-4"></i> Copied!'; 
-                button.classList.add('bg-green-500');
-                button.classList.remove('bg-blue-400');
-                createIcons({ icons: lucideIcons });
-            } catch (err) {
-                console.error('Copy failed:', err);
-                button.innerHTML = 'Failed';
-                button.classList.add('bg-red-500');
-            } finally {
-                document.body.removeChild(textarea);
-                setTimeout(() => {
-                    button.innerHTML = originalText;
-                    button.classList.remove('bg-green-500', 'bg-red-500');
-                    button.classList.add('bg-blue-400');
-                    createIcons({ icons: lucideIcons });
-                }, 2000);
-            }
-        }
-
-        // --- Start Application ---
-        showLoading();
-        initializeFirebase().then(() => {
-            hideLoading();
-        });
-
+        // --- START APPLICATION ---
+        window.onload = initializeFirebase;
     </script>
 </body>
 </html>
