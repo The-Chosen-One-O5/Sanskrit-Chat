@@ -4,6 +4,22 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sanskrit Universal Chat</title>
+    
+    <!-- PWA & Icon Meta Tags -->
+    <meta name="theme-color" content="#FACC15"> 
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Sanskrit Chat" />
+
+    <!-- Favicon Links -->
+    <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    
+    <!-- Manifest Link (Updated path from manifest.json to /site.webmanifest) -->
+    <link rel="manifest" href="/site.webmanifest" />
+    
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         /* Custom styles for aesthetic appeal and responsiveness */
@@ -77,13 +93,14 @@
 
     <script type="module">
         // --- LUCIDE ICONS ---
-        import { createIcons, Search, MessageSquare, Plus, LogIn, Send, Copy, AlertTriangle, Check, List, Zap } from 'https://esm.sh/lucide@latest';
-        const lucideIcons = { Search, MessageSquare, Plus, LogIn, Send, Copy, AlertTriangle, Check, List, Zap };
+        import { createIcons, Search, MessageSquare, Plus, LogIn, Send, Copy, AlertTriangle, Check, List, Zap, Trash2 } from 'https://esm.sh/lucide@latest';
+        const lucideIcons = { Search, MessageSquare, Plus, LogIn, Send, Copy, AlertTriangle, Check, List, Zap, Trash2 };
 
         // --- FIREBASE SDKs ---
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, collection, addDoc, onSnapshot, serverTimestamp, query, orderBy, getDoc, setDoc, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        // NOTE: We need deleteDoc for room deletion
+        import { getFirestore, doc, collection, addDoc, onSnapshot, serverTimestamp, query, orderBy, getDoc, setDoc, where, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- CONSTANTS ---
         // Vercel Serverless Function Endpoint for Translation
@@ -119,6 +136,7 @@
         let userName = '';
         let currentState = STATE.NAME_INPUT;
         let currentRoomCode = '';
+        let currentRoomData = null; // Store room metadata for host check
         let messages = [];
         let publicRooms = [];
         let unsubscribePublicRooms = null; 
@@ -158,7 +176,6 @@
             }, 5000);
         }
         
-        // Simplified check for the app container to handle error display logic
         function showError(message) {
             alertMessage(message, 'error');
         }
@@ -174,7 +191,6 @@
         async function initializeFirebase() {
             showLoading();
             
-            // FIX: Ensure firebaseConfig is always defined with the project ID by using a fallback.
             let firebaseConfig = USER_PROVIDED_FIREBASE_CONFIG;
             if (typeof __firebase_config !== 'undefined' && __firebase_config.trim() !== '') {
                 try {
@@ -197,7 +213,6 @@
                         if (user) {
                             userId = user.uid;
                         } else {
-                            // First time or signed out, attempt anonymous sign-in
                             try {
                                 if (initialAuthToken) {
                                     await signInWithCustomToken(auth, initialAuthToken);
@@ -216,7 +231,6 @@
                     });
                 });
                 
-                // FINAL FIX: Render the initial state ONLY after successful authentication
                 switchState(STATE.NAME_INPUT);
                 
             } catch (error) {
@@ -237,7 +251,6 @@
             if (!db) return;
 
             const roomsRef = collection(db, `artifacts/${appId}/public/data/sanskrit_rooms`);
-            // FIX: Remove orderBy to avoid requiring an index, filter only by where clause.
             const publicRoomsQuery = query(roomsRef, where("isPublic", "==", true)); 
 
             unsubscribePublicRooms = onSnapshot(publicRoomsQuery, (snapshot) => {
@@ -246,9 +259,7 @@
                     publicRooms.push({ id: doc.id, ...doc.data() });
                 });
                 
-                // FIX: Sort the rooms client-side by createdAt descending to maintain order
                 publicRooms.sort((a, b) => {
-                    // Convert Firestore Timestamps to milliseconds for comparison, handling potential nulls
                     const timeA = a.createdAt?.toDate().getTime() || 0;
                     const timeB = b.createdAt?.toDate().getTime() || 0;
                     return timeB - timeA;
@@ -284,6 +295,11 @@
             }, (error) => {
                 console.error("Error listening to messages:", error);
                 showError("Real-time connection lost. Check your network.");
+                // If the room no longer exists (e.g., deleted by host)
+                if (error.code === 'not-found' || error.code === 'permission-denied') {
+                    alertMessage("The room you were in was closed by the host or no longer exists.", 'info');
+                    switchState(STATE.ROOM_HUB);
+                }
             });
         }
         
@@ -296,6 +312,7 @@
             }
             unsubscribePublicRooms = null;
             unsubscribeChat = null;
+            currentRoomData = null; // Clear room metadata
         }
 
 
@@ -326,18 +343,21 @@
                 const roomSnap = await getDoc(roomRef);
                 if (roomSnap.exists()) {
                     hideLoading();
-                    return createRoom(roomName, isPublic); // Try again with a new code
+                    return createRoom(roomName, isPublic);
                 }
 
-                await setDoc(roomRef, { 
+                const newRoomData = { 
                     createdAt: serverTimestamp(), 
                     hostId: userId,
                     hostName: userName,
                     roomName: roomName,
                     isPublic: isPublic
-                });
+                };
+
+                await setDoc(roomRef, newRoomData);
                 
                 currentRoomCode = newCode;
+                currentRoomData = newRoomData; // Store new room data
                 switchState(STATE.CHAT);
                 listenToChat(newCode);
                 sendSystemMessage(newCode, 'JOINED');
@@ -368,6 +388,7 @@
                 }
                 
                 currentRoomCode = code;
+                currentRoomData = roomSnap.data(); // Store joined room data
                 switchState(STATE.CHAT);
                 listenToChat(code);
                 sendSystemMessage(code, 'JOINED');
@@ -375,6 +396,36 @@
             } catch (e) {
                 console.error("Error joining room:", e);
                 showError("Failed to join room. Database error.");
+            } finally {
+                hideLoading();
+            }
+        }
+        
+        async function deleteRoom() {
+            if (currentRoomData.hostId !== userId) {
+                showError("Permission denied. Only the room host can delete this room.");
+                return;
+            }
+
+            showLoading();
+            const roomCodeToDelete = currentRoomCode;
+            const roomRef = doc(db, `artifacts/${appId}/public/data/sanskrit_rooms`, roomCodeToDelete);
+
+            try {
+                // Deleting the room document. Note: This does NOT automatically delete subcollections (messages)
+                // but since the chat listens only to the main room's existence, this is sufficient to stop chat activity.
+                await deleteDoc(roomRef);
+                
+                // Navigate back to the hub
+                currentRoomCode = '';
+                currentRoomData = null;
+                messages = [];
+                switchState(STATE.ROOM_HUB);
+                alertMessage(`Room ${roomCodeToDelete} has been successfully deleted.`, 'info');
+
+            } catch (e) {
+                console.error("Error deleting room:", e);
+                showError("Failed to delete room. Check Firebase Security Rules.");
             } finally {
                 hideLoading();
             }
@@ -468,7 +519,6 @@
         function renderState() {
             mainViewContainer.innerHTML = '';
             
-            // Clean up listeners when leaving CHAT or ROOM_HUB
             if (currentState !== STATE.ROOM_HUB) {
                 cleanupListeners();
             }
@@ -493,7 +543,6 @@
                 default:
                     renderNameInput();
             }
-            // Ensure icons are rendered after new HTML is injected
             createIcons({ icons: lucideIcons });
         }
 
@@ -618,11 +667,33 @@
         }
 
         function renderChat() {
+            // Check if current user is the host
+            const isHost = currentRoomData && currentRoomData.hostId === userId;
+            const deleteButtonHtml = isHost ? `
+                <div id="delete-actions" class="mt-4 flex flex-col items-center">
+                    <button id="show-delete-confirm-btn" class="text-sm text-red-500 hover:text-red-700 font-semibold p-1 transition duration-150 flex items-center">
+                        <i data-lucide="trash-2" class="w-4 h-4 mr-1"></i>
+                        Delete Room
+                    </button>
+                    <div id="delete-confirm-box" class="hidden mt-2 p-3 bg-red-100 border border-red-400 rounded-lg shadow-md text-sm w-full">
+                        <p class="text-red-700 font-medium mb-2">Are you sure? This action is permanent.</p>
+                        <div class="flex justify-around">
+                            <button id="confirm-delete-btn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-1 px-3 rounded-md transition duration-150">
+                                Yes, Delete
+                            </button>
+                            <button id="cancel-delete-btn" class="bg-gray-400 hover:bg-gray-500 text-white font-bold py-1 px-3 rounded-md transition duration-150">
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            ` : '';
+
             mainViewContainer.innerHTML = `
                 <div class="flex items-center justify-between mb-4 pb-2 border-b-2 border-yellow-500">
                     <h2 class="text-2xl font-bold text-gray-800 flex items-center">
                         <i data-lucide="message-square" class="w-6 h-6 mr-2 text-orange-500"></i>
-                        Room: ${currentRoomCode}
+                        ${currentRoomData?.roomName || 'Chat Room'}
                     </h2>
                     <button id="leave-room-btn" class="text-sm text-red-500 hover:text-red-700 font-semibold p-1 transition duration-150">
                         Leave
@@ -630,8 +701,10 @@
                 </div>
 
                 <div class="mb-4 p-3 bg-blue-100 border-l-4 border-blue-500 text-blue-800 text-sm rounded-r-lg shadow-sm">
-                    <p class="font-bold">Chatting as: ${userName}</p>
+                    <p class="font-bold">Chatting as: ${userName} (Room Code: ${currentRoomCode})</p>
                 </div>
+                
+                ${deleteButtonHtml}
 
                 <div id="messages-list" class="chat-message-container space-y-4 p-2">
                     <div class="text-center text-gray-500 pt-8" id="empty-state">
@@ -651,8 +724,6 @@
             
             document.getElementById('leave-room-btn').addEventListener('click', () => {
                 sendSystemMessage(currentRoomCode, 'LEFT').then(() => {
-                    currentRoomCode = '';
-                    messages = [];
                     switchState(STATE.ROOM_HUB);
                 });
             });
@@ -663,6 +734,26 @@
                 translateAndSendMessage(input.value);
             });
             
+            // Host deletion logic setup
+            if (isHost) {
+                const showDeleteBtn = document.getElementById('show-delete-confirm-btn');
+                const deleteConfirmBox = document.getElementById('delete-confirm-box');
+                const confirmDeleteBtn = document.getElementById('confirm-delete-btn');
+                const cancelDeleteBtn = document.getElementById('cancel-delete-btn');
+
+                showDeleteBtn.addEventListener('click', () => {
+                    deleteConfirmBox.classList.remove('hidden');
+                    showDeleteBtn.classList.add('hidden');
+                });
+                
+                cancelDeleteBtn.addEventListener('click', () => {
+                    deleteConfirmBox.classList.add('hidden');
+                    showDeleteBtn.classList.remove('hidden');
+                });
+
+                confirmDeleteBtn.addEventListener('click', deleteRoom);
+            }
+
             renderChatMessages(); 
         }
 
@@ -714,7 +805,6 @@
                 `;
             }).join('');
 
-            // Scroll to the bottom on new message
             list.scrollTop = list.scrollHeight;
         }
 
