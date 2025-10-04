@@ -106,6 +106,7 @@
         const TRANSLATION_ENDPOINT = "/api/translate"; 
         // 24 hours in milliseconds for inactivity check
         const INACTIVITY_LIMIT_MS = 24 * 60 * 60 * 1000; 
+        const USER_NAME_STORAGE_KEY = 'sanskrit_chat_user_name';
         
         // Firebase Config Fallback (User provided)
         const USER_PROVIDED_FIREBASE_CONFIG = {
@@ -192,6 +193,12 @@
         async function initializeFirebase() {
             showLoading();
             
+            // Load user name from local storage if available
+            const storedName = localStorage.getItem(USER_NAME_STORAGE_KEY);
+            if (storedName) {
+                userName = storedName;
+            }
+
             let firebaseConfig = USER_PROVIDED_FIREBASE_CONFIG;
             if (typeof __firebase_config !== 'undefined' && __firebase_config.trim() !== '') {
                 try {
@@ -232,7 +239,12 @@
                     });
                 });
                 
-                switchState(STATE.NAME_INPUT);
+                // Determine initial state based on persistent name
+                if (userName) {
+                    switchState(STATE.ROOM_HUB);
+                } else {
+                    switchState(STATE.NAME_INPUT);
+                }
                 
             } catch (error) {
                 console.error("Fatal Error initializing Firebase:", error);
@@ -596,6 +608,7 @@
                 const name = document.getElementById('user-name-input').value.trim();
                 if (name) {
                     userName = name.substring(0, 20);
+                    localStorage.setItem(USER_NAME_STORAGE_KEY, userName); // Save name
                     switchState(STATE.ROOM_HUB);
                 } else {
                     showError("Please enter a name.");
