@@ -4,9 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Study Mentor</title>
-    <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Load MathJax for LaTeX/Chemtex Rendering -->
     <script>
         // Configuration for MathJax to support LaTeX and mhchem for chemical formulas
         window.MathJax = {
@@ -17,7 +15,6 @@
             },
             startup: {
                 pageReady: () => {
-                    // console.log('MathJax ready');
                     return MathJax.startup.defaultPageReady();
                 }
             }
@@ -115,20 +112,16 @@
 </head>
 <body class="antialiased">
 
-    <!-- Sidebar Trigger Area -->
     <div class="sidebar-trigger-area" onmouseover="toggleSidebar(true)"></div>
 
-    <!-- Sneaky Sidebar -->
     <div id="sidebar" class="fixed top-0 left-0 h-screen primary-bg p-6 shadow-2xl flex flex-col">
         <h2 class="text-3xl font-bold text-teal-bg mb-8">Study Mentor</h2>
         
-        <!-- Sidebar Navigation -->
         <nav class="space-y-3 flex-grow">
             <button class="w-full text-left py-3 px-4 rounded-lg transition duration-150 hover:bg-teal-bg/30 text-lg flex items-center space-x-3" onclick="navigate('chat')">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-teal-bg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 4v-4z" /></svg>
                 <span>AI Chat</span>
             </button>
-            <!-- Updated to navigate to setup screen first -->
             <button class="w-full text-left py-3 px-4 rounded-lg transition duration-150 hover:bg-teal-bg/30 text-lg flex items-center space-x-3" onclick="navigate('flashcard_setup')">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-teal-bg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 12l3-3 3 3 3-3M3 21h18M3 10h18M3 7h18M3 3h18" /></svg>
                 <span>Flashcards</span>
@@ -150,14 +143,11 @@
         <p class="text-xs text-gray-500 mt-6">sanskrit-chat.vercel.app/magic</p>
     </div>
 
-    <!-- Main Content Area -->
     <div id="content-area" class="min-h-screen p-8 transition-all duration-300" onmouseover="toggleSidebar(false)">
-        <!-- Content will be rendered here based on the current view -->
         <div class="max-w-4xl mx-auto">
             <h1 class="text-4xl font-extrabold text-teal-bg mb-8">AI Study Mentor</h1>
             <div id="view-content">
-                <!-- Initial content will be AI Chat -->
-            </div>
+                </div>
         </div>
     </div>
 
@@ -287,7 +277,7 @@
             `;
         }
         
-        // --- API Interaction/Simulation (FIXED FOR ROBUSTNESS) ---
+        // --- API Interaction/Simulation (CRITICALLY FIXED FOR DEBUGGING) ---
 
         /**
          * Simulates a secure call to the Vercel Serverless Function.
@@ -298,7 +288,6 @@
             const delay = Math.pow(2, retryCount) * 1000; // Exponential backoff
 
             try {
-                // IMPORTANT: The code assumes this Vercel endpoint exists and works as described.
                 const response = await fetch(API_ENDPOINT, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -306,34 +295,51 @@
                 });
 
                 if (!response.ok) {
-                    // Log the error status and retry
-                    console.error(`HTTP error! Status: ${response.status}. Response text: ${await response.text()}`);
-                    throw new Error(`HTTP error! Status: ${response.status}`);
+                    // CRITICAL: Read response as text for detailed error logging on 4xx/5xx
+                    const errorText = await response.text().catch(() => 'No readable response body.');
+                    console.error(`HTTP ERROR ${response.status}: ${response.statusText}. Raw Body: ${errorText}`);
+                    throw new Error(`AI API returned error: Status ${response.status}. Raw response in console.`);
+                }
+                
+                // Attempt to parse JSON. Clone the response in case parsing fails 
+                // and we need to read the body as text again.
+                const clone = response.clone();
+                let data;
+                
+                try {
+                    data = await response.json();
+                } catch (e) {
+                    // JSON parsing failed. Read the raw text body for the error message.
+                    const rawText = await clone.text().catch(() => 'Could not read response body.');
+                    console.error("JSON PARSE FAILURE. Raw body from API:", rawText);
+                    throw new Error(`Failed to parse AI response as JSON. Check server logs/raw response in console.`);
                 }
 
                 // Assuming the TypeGPT/Vercel endpoint returns a JSON with a 'text' field
-                const data = await response.json();
-                
-                // CRITICAL FIX: Ensure data is valid and contains the text field
                 const aiContent = data.text || data.response || data.content;
 
                 if (typeof aiContent === 'string' && aiContent.trim().length > 0) {
                     return aiContent;
                 } else {
-                    // If response is OK but content is missing or not a string
-                    throw new Error("AI response content is empty or malformed.");
+                    // If response is OK and JSON parsed, but content field is missing/empty
+                    console.error("AI JSON structure valid, but content field is missing:", data);
+                    throw new Error("AI response content field ('text'/'response'/'content') is empty or missing.");
                 }
 
 
             } catch (error) {
-                console.error(`AI Fetch Attempt ${retryCount + 1} failed:`, error.message);
+                const finalErrorMessage = error.message.includes('fetch') 
+                    ? `Network/Server Error. Is Vercel function running? Error: ${error.message}` 
+                    : error.message;
+
+                console.error(`Final Fetch Attempt Error:`, finalErrorMessage);
+
                 if (retryCount < maxRetries) {
-                    setLoading(true, `AI failed to respond: ${error.message}. Retrying in ${delay / 1000}s...`);
+                    setLoading(true, `AI failed to respond. Retrying in ${delay / 1000}s. Check console for details...`);
                     await new Promise(resolve => setTimeout(resolve, delay));
                     return fetchAIResponse(prompt, retryCount + 1);
                 } else {
-                    // Throw a final, clear error if all retries fail
-                    throw new Error("AI service unavailable after multiple retries. Check Vercel logs/API key.");
+                    throw new Error(`AI service unavailable after ${maxRetries} retries. ${finalErrorMessage}`);
                 }
             }
         }
@@ -371,7 +377,7 @@
                 const aiResponse = await fetchAIResponse(fullPrompt);
                 chatHistory.push({ role: 'ai', text: aiResponse });
             } catch (error) {
-                chatHistory.push({ role: 'error', text: "Error connecting to AI service. Please try again. Details: " + error.message });
+                chatHistory.push({ role: 'error', text: "Error connecting to AI service. Details in console." });
                 console.error(error);
             } finally {
                 setLoading(false);
@@ -494,7 +500,6 @@
                     <h2 class="text-3xl font-bold text-teal-bg">Flashcard Generator</h2>
                     <p class="text-gray-400">Specify the topic and the number of cards you want to generate. The AI will create the deck.</p>
 
-                    <!-- Input Fields -->
                     ${renderInput('Topic', 'topic', setup.topic, 'e.g., Quantum Mechanics, $S_N1$ vs $S_N2$', 'text', '', 'updateFlashcardSetup')}
                     ${renderInput('Number of Questions', 'numQuestions', setup.numQuestions, '1 - 30', 'number', 'min="1" max="30"', 'updateFlashcardSetup')}
 
@@ -639,21 +644,17 @@
                         </div>
                     </div>
 
-                    <!-- Flashcard UI -->
                     <div class="flashcard-container mb-6" onclick="appState.flashcardState.showBack = !appState.flashcardState.showBack; renderView();">
                         <div class="flashcard-inner w-full h-full ${flipClass}">
-                            <!-- Front -->
                             <div class="flashcard-front ${cardBgColor} text-cream-text text-3xl font-semibold text-center cursor-pointer">
                                 <span>${card.front}</span>
                             </div>
-                            <!-- Back -->
                             <div class="flashcard-back ${cardBgColor} text-cream-text text-xl text-center overflow-y-auto cursor-pointer">
                                 <span>${card.back}</span>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Action Buttons -->
                     <div class="flex justify-between items-center space-x-4 mt-6">
                         ${appState.flashcardState.showBack ? `
                             <button onclick="markFlashcard('incorrect')" class="flex-1 py-3 bg-red-600 rounded-lg text-white font-bold hover:bg-red-700 transition duration-150">
@@ -672,7 +673,6 @@
                         </button>
                     </div>
 
-                    <!-- Revision Button -->
                     <div class="text-center mt-6">
                         <button onclick="goToRevision()" class="text-teal-bg hover:underline font-semibold">
                             Revise Cards I Got Wrong (${appState.flashcardState.incorrectCards.length})
@@ -868,7 +868,6 @@
                     <h2 class="text-3xl font-bold text-teal-bg">Setup Your AI Quiz</h2>
                     <p class="text-gray-400">The AI will generate questions based on your specific requirements.</p>
 
-                    <!-- Input Fields -->
                     ${renderInput('Topic', 'topic', setup.topic, 'e.g., $S_N2$ Reactions in Organic Chemistry', 'text', '', 'updateQuizSetup')}
                     ${renderSelect('Difficulty', 'difficulty', difficulties, setup.difficulty)}
                     ${renderSelect('Exam Standard', 'exam', exams, setup.exam)}
@@ -951,7 +950,6 @@
                         </button>
                     </div>
 
-                    <!-- Navigation and Check -->
                     <div class="flex justify-between space-x-4 pt-4 border-t border-gray-700">
                         <button onclick="previousQuestion()" 
                                 class="flex-1 py-3 secondary-bg rounded-lg text-white font-bold hover:bg-blue-800 transition duration-150 ${appState.quiz.currentQIndex === 0 ? 'opacity-50 cursor-not-allowed' : ''}" 
