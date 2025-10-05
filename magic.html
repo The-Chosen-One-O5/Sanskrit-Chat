@@ -1,0 +1,1156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Study Mentor</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load MathJax for LaTeX/Chemtex Rendering -->
+    <script>
+        // Configuration for MathJax to support LaTeX and mhchem for chemical formulas
+        window.MathJax = {
+            loader: { load: ['[tex]/mhchem'] },
+            tex: {
+                inlineMath: [['$', '$'], ['\\(', '\\)']],
+                packages: { '[+]': ['mhchem'] }
+            },
+            startup: {
+                pageReady: () => {
+                    // console.log('MathJax ready');
+                    return MathJax.startup.defaultPageReady();
+                }
+            }
+        };
+    </script>
+    <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+    <style>
+        /* Custom styles for the dark theme and sidebar */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1a1a2e; /* Dark Grey/Deep Blue Background */
+            color: #e0e0e0; /* Light text */
+            overflow-x: hidden; /* Prevent horizontal scroll when sidebar is off-screen */
+            min-height: 100vh;
+        }
+
+        /* Sneaky Sidebar Styling */
+        #sidebar {
+            width: 280px;
+            transform: translateX(-280px); /* Initially off-screen */
+            transition: transform 0.3s ease-in-out;
+            z-index: 50;
+        }
+
+        #sidebar.open {
+            transform: translateX(0); /* Slide in */
+        }
+
+        /* Trigger area for the sidebar (left 10px of the screen) */
+        .sidebar-trigger-area {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 10px;
+            height: 100vh;
+            z-index: 100; /* Above the sidebar itself */
+            cursor: pointer;
+        }
+
+        /* Primary and secondary colors */
+        .primary-bg { background-color: #1a1a2e; } /* Dark Grey/Deep Blue */
+        .secondary-bg { background-color: #0d47a1; } /* Blue Accent */
+        .teal-bg { background-color: #00897b; } /* Teal Accent */
+        .cream-text { color: #fdf5e6; } /* Cream */
+        .yellow-accent { background-color: #ffc107; } /* Yellow */
+        .yellow-hover:hover { background-color: #ffb300; }
+
+        /* Custom scrollbar for better look on dark theme */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #1a1a2e;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #00897b; /* Teal */
+            border-radius: 4px;
+        }
+
+        /* Flashcard specific styles */
+        .flashcard-flip {
+            transform: rotateY(180deg);
+        }
+
+        .flashcard-container {
+            perspective: 1000px;
+            height: 350px;
+        }
+
+        .flashcard-inner {
+            transition: transform 0.6s;
+            transform-style: preserve-3d;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .flashcard-front, .flashcard-back {
+            backface-visibility: hidden;
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 1.5rem;
+            border-radius: 12px;
+        }
+
+        .flashcard-back {
+            transform: rotateY(180deg);
+        }
+    </style>
+</head>
+<body class="antialiased">
+
+    <!-- Sidebar Trigger Area -->
+    <div class="sidebar-trigger-area" onmouseover="toggleSidebar(true)"></div>
+
+    <!-- Sneaky Sidebar -->
+    <div id="sidebar" class="fixed top-0 left-0 h-screen primary-bg p-6 shadow-2xl flex flex-col">
+        <h2 class="text-3xl font-bold text-teal-bg mb-8">Study Mentor</h2>
+        
+        <!-- Sidebar Navigation -->
+        <nav class="space-y-3 flex-grow">
+            <button class="w-full text-left py-3 px-4 rounded-lg transition duration-150 hover:bg-teal-bg/30 text-lg flex items-center space-x-3" onclick="navigate('chat')">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-teal-bg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 4v-4z" /></svg>
+                <span>AI Chat</span>
+            </button>
+            <!-- Updated to navigate to setup screen first -->
+            <button class="w-full text-left py-3 px-4 rounded-lg transition duration-150 hover:bg-teal-bg/30 text-lg flex items-center space-x-3" onclick="navigate('flashcard_setup')">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-teal-bg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 12l3-3 3 3 3-3M3 21h18M3 10h18M3 7h18M3 3h18" /></svg>
+                <span>Flashcards</span>
+            </button>
+            <button class="w-full text-left py-3 px-4 rounded-lg transition duration-150 hover:bg-teal-bg/30 text-lg flex items-center space-x-3" onclick="navigate('quiz_setup')">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-teal-bg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944c2.836 0 5.568.51 8.164 1.456A21.507 21.507 0 0110.82 17.581l.488.39a2.53 2.53 0 011.666 0l.488-.39A21.507 21.507 0 013.836 17.581l.488-.39a2.53 2.53 0 011.666 0l.488.39A21.507 21.507 0 0112 2.944z" /></svg>
+                <span>Quiz</span>
+            </button>
+            <button class="w-full text-left py-3 px-4 rounded-lg transition duration-150 hover:bg-teal-bg/30 text-lg flex items-center space-x-3" onclick="navigate('analyser')">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-teal-bg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 3.055A9.98 9.98 0 0112 3c5.523 0 10 4.477 10 10 0 2.21-.726 4.25-1.955 5.945M12 21a9.98 9.98 0 01-1-17.945M12 21c-.447 0-.882-.036-1.306-.108M12 21c.447 0 .882-.036 1.306-.108m-1.306-.108A9.98 9.98 0 0112 21" /></svg>
+                <span>Analyser</span>
+            </button>
+            <button class="w-full text-left py-3 px-4 rounded-lg transition duration-150 hover:bg-teal-bg/30 text-lg flex items-center space-x-3" onclick="navigate('dps')">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-teal-bg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                <span>Dynamic Problem Solving</span>
+            </button>
+        </nav>
+        
+        <p class="text-xs text-gray-500 mt-6">sanskrit-chat.vercel.app/magic</p>
+    </div>
+
+    <!-- Main Content Area -->
+    <div id="content-area" class="min-h-screen p-8 transition-all duration-300" onmouseover="toggleSidebar(false)">
+        <!-- Content will be rendered here based on the current view -->
+        <div class="max-w-4xl mx-auto">
+            <h1 class="text-4xl font-extrabold text-teal-bg mb-8">AI Study Mentor</h1>
+            <div id="view-content">
+                <!-- Initial content will be AI Chat -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Global State Management ---
+        const API_ENDPOINT = "/api/translate"; // The Vercel Serverless Function endpoint
+        
+        let appState = {
+            currentView: 'chat',
+            isSidebarOpen: false,
+            quiz: {
+                setup: { topic: '', difficulty: 'Medium', exam: 'CBSE Boards', numQuestions: 5, pattern: 'MCQ only' },
+                questions: [], // Array of generated questions
+                currentQIndex: 0,
+                report: [] // Array of user responses and results
+            },
+            flashcards: [], // Now dynamic, initially empty
+            flashcardSetup: { topic: 'Chemistry', numQuestions: 5 }, // New setup state for inputs
+            flashcardState: {
+                currentCardIndex: 0,
+                showBack: false,
+                incorrectCards: [],
+                timer: 30,
+                timerInterval: null
+            },
+            analysisData: {
+                lastRun: null,
+                score: '0/0',
+                concepts: [],
+                problemAreas: []
+            },
+            loading: false,
+            message: null,
+            messageColor: 'bg-red-600'
+        };
+
+        // --- Core UI Logic ---
+
+        function toggleSidebar(open) {
+            const sidebar = document.getElementById('sidebar');
+            const contentArea = document.getElementById('content-area');
+
+            if (open === undefined) {
+                appState.isSidebarOpen = !appState.isSidebarOpen;
+            } else {
+                appState.isSidebarOpen = open;
+            }
+
+            if (appState.isSidebarOpen) {
+                sidebar.classList.add('open');
+                contentArea.style.marginLeft = '280px';
+                // Prevents the trigger area from constantly re-triggering while open
+                document.querySelector('.sidebar-trigger-area').style.width = '0';
+            } else {
+                sidebar.classList.remove('open');
+                contentArea.style.marginLeft = '0';
+                // Restore trigger area width
+                document.querySelector('.sidebar-trigger-area').style.width = '10px';
+            }
+        }
+
+        function navigate(view) {
+            appState.currentView = view;
+            toggleSidebar(false);
+            setMessage(null); // Clear messages on navigation
+            renderView();
+            // Scroll to top
+            window.scrollTo(0, 0);
+        }
+
+        function setLoading(state, msg = null) {
+            appState.loading = state;
+            appState.message = msg;
+            renderView(); // Re-render to show/hide loading state
+        }
+
+        // Rerender all components that need to change
+        function renderView() {
+            const viewContent = document.getElementById('view-content');
+            let html = '';
+
+            if (appState.loading) {
+                html = renderLoadingScreen();
+            } else {
+                switch (appState.currentView) {
+                    case 'chat':
+                        html = renderChat();
+                        break;
+                    case 'flashcard_setup': // New setup view
+                        html = renderFlashcardSetup();
+                        break;
+                    case 'flashcards':
+                    case 'flashcard_revision':
+                        html = renderFlashcards();
+                        break;
+                    case 'quiz_setup':
+                        html = renderQuizSetup();
+                        break;
+                    case 'quiz_run':
+                        html = renderQuizRun();
+                        break;
+                    case 'analyser':
+                        html = renderAnalyser();
+                        break;
+                    case 'dps':
+                        html = renderDPS();
+                        break;
+                    default:
+                        html = renderChat();
+                }
+            }
+            viewContent.innerHTML = html;
+            
+            // Re-render MathJax content if the view has a math expression
+            if (window.MathJax) {
+                MathJax.typesetPromise();
+            }
+        }
+
+        function renderLoadingScreen() {
+            return `
+                <div class="flex flex-col items-center justify-center h-[60vh] p-8 rounded-xl primary-bg shadow-xl">
+                    <div class="animate-spin rounded-full h-16 w-16 border-b-4 border-t-4 border-teal-bg"></div>
+                    <p class="mt-6 text-xl font-semibold text-cream-text">${appState.message || "Generating content with AI. Please wait..."}</p>
+                    <p class="text-gray-400 mt-2 text-center">It might take up to a few minutes for complex requests (like 30 questions or deep analysis).</p>
+                </div>
+            `;
+        }
+        
+        // --- API Interaction/Simulation ---
+
+        /**
+         * Simulates a secure call to the Vercel Serverless Function.
+         * The prompt is sent, and the response is returned as text.
+         */
+        async function fetchAIResponse(prompt, retryCount = 0) {
+            const maxRetries = 5;
+            const delay = Math.pow(2, retryCount) * 1000; // Exponential backoff
+
+            try {
+                // IMPORTANT: The code assumes this Vercel endpoint exists and works as described.
+                const response = await fetch(API_ENDPOINT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt: prompt })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+
+                // Assuming the TypeGPT/Vercel endpoint returns a JSON with a 'text' field
+                const data = await response.json();
+                return data.text || data.response || data.content;
+
+            } catch (error) {
+                console.error(`Attempt ${retryCount + 1} failed:`, error.message);
+                if (retryCount < maxRetries) {
+                    setLoading(true, `AI failed to respond. Retrying in ${delay / 1000}s...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    return fetchAIResponse(prompt, retryCount + 1);
+                } else {
+                    throw new Error("AI service unavailable after multiple retries.");
+                }
+            }
+        }
+        
+        // Generic Helper for rendering inputs (used by Quiz and Flashcards)
+        function renderInput(label, id, value, placeholder, type = 'text', attributes = '', updateFunc) {
+            return `
+                <div>
+                    <label for="${id}" class="block text-sm font-medium text-cream-text mb-1">${label}</label>
+                    <input type="${type}" id="${id}_${id.substring(0, 3)}" value="${value}" placeholder="${placeholder}" ${attributes}
+                           onchange="${updateFunc}('${id}', this.value)"
+                           class="w-full p-3 rounded-lg bg-gray-700 text-cream-text border-2 border-teal-bg focus:ring-teal-bg focus:border-teal-bg focus:outline-none">
+                </div>
+            `;
+        }
+
+
+        // --- Feature Renderers ---
+
+        // 1. AI CHAT
+        const chatHistory = [];
+        async function sendChatMessage() {
+            const input = document.getElementById('chat-input');
+            const message = input.value.trim();
+            if (!message) return;
+
+            chatHistory.push({ role: 'user', text: message });
+            input.value = '';
+            renderChat(); // Show user message
+
+            setLoading(true, "AI Mentor is thinking...");
+
+            try {
+                const fullPrompt = `You are a helpful study mentor. The user asks: ${message}\n\nChat History: ${chatHistory.map(m => `${m.role}: ${m.text}`).join('\n')}`;
+                const aiResponse = await fetchAIResponse(fullPrompt);
+                chatHistory.push({ role: 'ai', text: aiResponse });
+            } catch (error) {
+                chatHistory.push({ role: 'error', text: "Error connecting to AI service. Please try again." });
+                console.error(error);
+            } finally {
+                setLoading(false);
+                renderChat();
+                // Scroll to bottom of chat
+                const chatArea = document.getElementById('chat-messages');
+                if (chatArea) chatArea.scrollTop = chatArea.scrollHeight;
+            }
+        }
+
+        function renderChat() {
+            const chatMessagesHtml = chatHistory.map(msg => {
+                const baseClasses = "p-3 my-2 rounded-lg max-w-lg";
+                if (msg.role === 'user') {
+                    return `<div class="flex justify-end"><div class="${baseClasses} secondary-bg text-white">${msg.text}</div></div>`;
+                } else if (msg.role === 'ai') {
+                    return `<div class="flex justify-start"><div class="${baseClasses} teal-bg text-white">${msg.text}</div></div>`;
+                } else { // error
+                    return `<div class="flex justify-center"><div class="${baseClasses} bg-red-800 text-white text-sm">⚠️ ${msg.text}</div></div>`;
+                }
+            }).join('');
+
+            return `
+                <div class="h-[75vh] flex flex-col primary-bg rounded-xl shadow-2xl">
+                    <div id="chat-messages" class="flex-grow p-5 overflow-y-auto" style="max-height: calc(75vh - 70px);">
+                        ${chatMessagesHtml}
+                    </div>
+                    <div class="p-4 border-t border-gray-700 flex">
+                        <input id="chat-input" type="text" placeholder="Ask your AI mentor a question..."
+                               class="flex-grow p-3 rounded-l-lg bg-gray-700 text-cream-text border-2 border-teal-bg focus:outline-none"
+                               onkeydown="if(event.key === 'Enter') sendChatMessage()">
+                        <button onclick="sendChatMessage()" class="px-6 yellow-accent rounded-r-lg font-bold text-gray-900 yellow-hover transition duration-150">
+                            Send
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // 2. FLASHCARD SETUP AND GENERATION
+        
+        function updateFlashcardSetup(field, value) {
+            appState.flashcardSetup[field] = value;
+        }
+
+        async function generateFlashcards() {
+            const setup = appState.flashcardSetup;
+            const num = parseInt(setup.numQuestions, 10);
+            if (!setup.topic.trim() || isNaN(num) || num < 1 || num > 30) {
+                setMessage("Please enter a valid topic and 1-30 questions.", 'bg-red-600');
+                return;
+            }
+
+            // Clear previous cards and reset state before generation
+            appState.flashcards = [];
+            appState.flashcardState.currentCardIndex = 0;
+            appState.flashcardState.showBack = false;
+            appState.flashcardState.incorrectCards = [];
+
+            setLoading(true, `Generating ${num} Flashcards on ${setup.topic}.`);
+
+            const prompt = `Generate ${num} unique flashcards in a JSON array format on the topic: ${setup.topic}.
+            Each object in the array must have 'front' (the question/term) and 'back' (the answer/definition).
+            The content should be at a college/university level. Use complex LaTeX or Chemtex where appropriate (e.g., \\ce{} for chemical formulas or $S_N2$).
+        
+            The JSON array schema MUST be:
+            [
+                { "front": "...", "back": "..." },
+                { "front": "...", "back": "..." }
+            ]`;
+
+            try {
+                const jsonString = await fetchAIResponse(prompt);
+                let jsonContent = jsonString.trim();
+                // Check and strip markdown wrappers
+                if (jsonContent.startsWith('```json')) {
+                    jsonContent = jsonContent.substring(7, jsonContent.lastIndexOf('```')).trim();
+                }
+                const cards = JSON.parse(jsonContent);
+                
+                // Map the generated cards and add internal state properties
+                appState.flashcards = cards.map((card, index) => ({
+                    id: index + 1,
+                    front: card.front,
+                    back: card.back,
+                    correct: null
+                }));
+                
+                setMessage(null);
+                navigate('flashcards'); // Go to the run view
+                startFlashcardTimer();
+
+            } catch (error) {
+                setMessage("Flashcard generation failed. AI could not generate or parse the content.", 'bg-red-600');
+                console.error("Flashcard Generation Error:", error);
+                setLoading(false);
+            } finally {
+                if (appState.loading) setLoading(false);
+            }
+        }
+
+
+        function renderFlashcardSetup() {
+            const setup = appState.flashcardSetup;
+
+            return `
+                <div class="p-6 primary-bg rounded-xl shadow-2xl space-y-6">
+                    <h2 class="text-3xl font-bold text-teal-bg">Flashcard Generator</h2>
+                    <p class="text-gray-400">Specify the topic and the number of cards you want to generate. The AI will create the deck.</p>
+
+                    <!-- Input Fields -->
+                    ${renderInput('Topic', 'topic', setup.topic, 'e.g., Quantum Mechanics, $S_N1$ vs $S_N2$', 'text', '', 'updateFlashcardSetup')}
+                    ${renderInput('Number of Questions', 'numQuestions', setup.numQuestions, '1 - 30', 'number', 'min="1" max="30"', 'updateFlashcardSetup')}
+
+                    ${appState.message ? `<div class="p-3 mt-4 text-center rounded-lg font-semibold text-white ${appState.messageColor}">${appState.message}</div>` : ''}
+
+                    <button onclick="generateFlashcards()" class="w-full py-4 text-xl yellow-accent rounded-lg font-bold text-gray-900 yellow-hover transition duration-150">
+                        Generate Flashcards
+                    </button>
+                </div>
+            `;
+        }
+
+        // 2. FLASHCARD RUN
+        function startFlashcardTimer() {
+            if (appState.flashcards.length === 0) return; // Don't start if no cards
+            if (appState.flashcardState.timerInterval) clearInterval(appState.flashcardState.timerInterval);
+            appState.flashcardState.timer = 30; // Reset timer
+            
+            const timerDisplay = document.getElementById('flashcard-timer-display');
+            if (!timerDisplay) return; // Safety check
+
+            appState.flashcardState.timerInterval = setInterval(() => {
+                appState.flashcardState.timer--;
+                if (timerDisplay) timerDisplay.innerText = appState.flashcardState.timer;
+
+                if (appState.flashcardState.timer <= 0) {
+                    // Time's up, automatically mark as incorrect if not answered
+                    const currentCards = getCurrentFlashcards();
+                    const currentCard = currentCards[appState.flashcardState.currentCardIndex];
+                    if (currentCard && currentCard.correct === null) {
+                        markFlashcard('incorrect');
+                    }
+                    clearInterval(appState.flashcardState.timerInterval);
+                }
+            }, 1000);
+        }
+
+        function getCurrentFlashcards() {
+            const isRevisionMode = appState.currentView === 'flashcard_revision';
+            return isRevisionMode 
+                ? appState.flashcards.filter(c => appState.flashcardState.incorrectCards.includes(c.id))
+                : appState.flashcards;
+        }
+
+        function markFlashcard(status) {
+            const cards = getCurrentFlashcards();
+            const card = cards[appState.flashcardState.currentCardIndex];
+            
+            if (!card) return;
+
+            clearInterval(appState.flashcardState.timerInterval);
+            
+            card.correct = (status === 'correct');
+            
+            if (status === 'incorrect' && !appState.flashcardState.incorrectCards.includes(card.id)) {
+                appState.flashcardState.incorrectCards.push(card.id);
+            }
+            
+            // Flip the card to show the answer (if not already flipped)
+            appState.flashcardState.showBack = true;
+            renderView();
+        }
+
+        function nextFlashcard() {
+            const cards = getCurrentFlashcards();
+            appState.flashcardState.currentCardIndex++;
+            
+            if (appState.flashcardState.currentCardIndex >= cards.length) {
+                appState.flashcardState.currentCardIndex = 0; // Loop back to start
+            }
+
+            appState.flashcardState.showBack = false;
+            startFlashcardTimer();
+            renderView();
+        }
+
+        function goToRevision() {
+            if (appState.flashcardState.incorrectCards.length === 0) {
+                setMessage("You got everything right! No revision needed.", 'bg-green-600');
+                return;
+            }
+            appState.currentView = 'flashcard_revision';
+            appState.flashcardState.currentCardIndex = 0;
+            appState.flashcardState.showBack = false;
+            // Reset results for only the cards being revised
+            appState.flashcards.forEach(c => {
+                if(appState.flashcardState.incorrectCards.includes(c.id)) {
+                    c.correct = null;
+                }
+            });
+            startFlashcardTimer();
+            renderView();
+        }
+        
+        function renderFlashcards() {
+            const isRevisionMode = appState.currentView === 'flashcard_revision';
+            const cards = getCurrentFlashcards();
+
+            if (cards.length === 0) {
+                 return `
+                    <div class="p-6 secondary-bg rounded-xl shadow-2xl h-[40vh] flex flex-col items-center justify-center">
+                        <h2 class="text-3xl font-bold text-cream-text mb-4">No Flashcards Generated</h2>
+                        <p class="text-lg text-gray-300">Start by generating a deck from the setup screen.</p>
+                        <button onclick="navigate('flashcard_setup')" class="mt-6 px-6 py-3 yellow-accent rounded-lg font-bold text-gray-900 yellow-hover transition duration-150">
+                            Go to Generator
+                        </button>
+                    </div>
+                `;
+            }
+
+            if (isRevisionMode && cards.length === 0) {
+                 return `
+                    <div class="h-[60vh] flex flex-col items-center justify-center p-8 rounded-xl secondary-bg shadow-xl">
+                        <h2 class="text-3xl font-bold text-cream-text mb-4">Revision Complete!</h2>
+                        <p class="text-lg text-gray-300 mb-6">You've successfully revised all the cards you got wrong.</p>
+                        <button onclick="navigate('flashcard_setup')" class="px-6 py-3 yellow-accent rounded-lg font-bold text-gray-900 yellow-hover transition duration-150">
+                            Generate New Cards
+                        </button>
+                    </div>
+                `;
+            }
+
+            const card = cards[appState.flashcardState.currentCardIndex];
+            const flipClass = appState.flashcardState.showBack ? 'flashcard-flip' : '';
+            const cardBgColor = card.correct === true ? 'bg-green-700' : card.correct === false ? 'bg-red-700' : 'secondary-bg';
+            const statusColor = card.correct === true ? 'bg-green-500' : card.correct === false ? 'bg-red-500' : 'bg-blue-500'; // blue for unselected
+
+            return `
+                <div class="p-6 primary-bg rounded-xl shadow-2xl">
+                    <h2 class="text-3xl font-bold text-teal-bg mb-6">${isRevisionMode ? 'Flashcard Revision' : 'Flashcards'} - ${appState.flashcardSetup.topic}</h2>
+                    
+                    <div class="flex justify-between items-center mb-4">
+                        <p class="text-lg">Card ${appState.flashcardState.currentCardIndex + 1} of ${cards.length}</p>
+                        <div class="flex items-center space-x-4">
+                            <span class="px-3 py-1 rounded-full ${statusColor} text-white text-sm font-semibold">
+                                ${card.correct === true ? 'Correct' : card.correct === false ? 'Incorrect' : 'Unselected'}
+                            </span>
+                            <div class="flex items-center space-x-2">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-yellow-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                <span id="flashcard-timer-display" class="text-xl font-bold text-yellow-accent">${appState.flashcardState.timer}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Flashcard UI -->
+                    <div class="flashcard-container mb-6" onclick="appState.flashcardState.showBack = !appState.flashcardState.showBack; renderView();">
+                        <div class="flashcard-inner w-full h-full ${flipClass}">
+                            <!-- Front -->
+                            <div class="flashcard-front ${cardBgColor} text-cream-text text-3xl font-semibold text-center cursor-pointer">
+                                <span>${card.front}</span>
+                            </div>
+                            <!-- Back -->
+                            <div class="flashcard-back ${cardBgColor} text-cream-text text-xl text-center overflow-y-auto cursor-pointer">
+                                <span>${card.back}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="flex justify-between items-center space-x-4 mt-6">
+                        ${appState.flashcardState.showBack ? `
+                            <button onclick="markFlashcard('incorrect')" class="flex-1 py-3 bg-red-600 rounded-lg text-white font-bold hover:bg-red-700 transition duration-150">
+                                I got it Wrong
+                            </button>
+                            <button onclick="markFlashcard('correct')" class="flex-1 py-3 bg-green-600 rounded-lg text-white font-bold hover:bg-green-700 transition duration-150">
+                                I got it Right
+                            </button>
+                        ` : `
+                            <button onclick="appState.flashcardState.showBack = true; renderView();" class="flex-1 py-3 secondary-bg rounded-lg text-white font-bold hover:bg-blue-800 transition duration-150">
+                                Show Answer
+                            </button>
+                        `}
+                        <button onclick="nextFlashcard()" class="flex-1 py-3 yellow-accent rounded-lg font-bold text-gray-900 yellow-hover transition duration-150">
+                            Next Card
+                        </button>
+                    </div>
+
+                    <!-- Revision Button -->
+                    <div class="text-center mt-6">
+                        <button onclick="goToRevision()" class="text-teal-bg hover:underline font-semibold">
+                            Revise Cards I Got Wrong (${appState.flashcardState.incorrectCards.length})
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 3. QUIZ
+        function updateQuizSetup(field, value) {
+            appState.quiz.setup[field] = value;
+        }
+        
+        // This function will handle the complex AI generation logic
+        async function startQuiz() {
+            const setup = appState.quiz.setup;
+            const num = parseInt(setup.numQuestions, 10);
+            if (isNaN(num) || num < 1) {
+                alert("Please enter a valid number of questions.");
+                return;
+            }
+
+            appState.quiz.questions = [];
+            appState.quiz.report = [];
+            appState.quiz.currentQIndex = 0;
+            navigate('quiz_run');
+
+            for (let i = 0; i < num; i++) {
+                // Show loading screen
+                setLoading(true, `Generating Question ${i + 1} of ${num}. This might take up to 10-15 minutes for 30 questions.`);
+                renderView();
+
+                const prompt = `Generate ONE, self-contained study question in JSON format.
+                Topic: ${setup.topic}. Difficulty: ${setup.difficulty}. Exam Standard: ${setup.exam}. Pattern: ${setup.pattern}.
+                The question must be high-quality and include complex LaTeX or Chemtex where appropriate (e.g., \\ce{} for chemical formulas, $S_N2$, or full equations/structures).
+                If the pattern is 'MCQ', provide 4 options (A, B, C, D) and the correct answer key.
+                If the pattern is 'MCQ and subjective', generate a subjective part.
+                
+                The JSON schema MUST be:
+                {
+                    "questionText": "...",
+                    "type": "MCQ" or "Subjective",
+                    "options": ["A) ...", "B) ...", "C) ...", "D) ..."] or null,
+                    "answerKey": "A" or "Subjective Answer",
+                    "hint": "...",
+                    "solution": "...",
+                    "source": "${setup.exam} ${new Date().getFullYear()}"
+                }`;
+
+                try {
+                    const jsonString = await fetchAIResponse(prompt);
+                    // Attempt to parse the JSON string. The AI might wrap it in markdown.
+                    let jsonContent = jsonString.trim();
+                    if (jsonContent.startsWith('```json')) {
+                        jsonContent = jsonContent.substring(7, jsonContent.lastIndexOf('```')).trim();
+                    }
+                    const newQ = JSON.parse(jsonContent);
+
+                    // Add the new question to the array
+                    appState.quiz.questions.push({
+                        ...newQ,
+                        userAnswer: null,
+                        attempts: 0,
+                        isCorrect: null,
+                        timer: 120 // 2 minutes per Q
+                    });
+
+                    // Update the running quiz view to show progress
+                    renderView();
+
+                } catch (error) {
+                    console.error("AI Generation Error or JSON Parse Error:", error);
+                    // If AI fails, the loop naturally continues to the next 'i' due to the retry logic in fetchAIResponse
+                    // If all retries fail, it throws, breaking the loop.
+                    setLoading(true, `AI failed to generate Q${i + 1}. Moving to next question...`);
+                    await new Promise(resolve => setTimeout(resolve, 3000)); // Short pause before next attempt
+                }
+            }
+            setLoading(false);
+            appState.quiz.currentQIndex = 0;
+            renderView(); // Start the actual quiz
+        }
+
+        // Quiz State Handlers
+        function checkAnswer() {
+            const q = appState.quiz.questions[appState.quiz.currentQIndex];
+            const selectedOption = q.userAnswer;
+            
+            if (!selectedOption) {
+                setMessage('Please select an option first.', 'yellow-accent');
+                return;
+            }
+
+            q.attempts++;
+
+            if (selectedOption === q.answerKey) {
+                q.isCorrect = true;
+                setMessage('Correct! Moving to the next question.', 'bg-green-600');
+                // Record to report
+                recordQuizReport(q, true);
+                setTimeout(nextQuestion, 2000);
+            } else {
+                if (q.attempts < 2) {
+                    q.isCorrect = false;
+                    setMessage('Incorrect! You have one more chance.', 'bg-red-600');
+                    renderView(); // Re-render to show feedback
+                } else {
+                    q.isCorrect = false;
+                    setMessage(`Incorrect again. The correct answer was ${q.answerKey}.`, 'bg-red-800');
+                    // Record to report (final attempt failed)
+                    recordQuizReport(q, false);
+                    setTimeout(nextQuestion, 3000);
+                }
+            }
+        }
+
+        function recordQuizReport(q, passed) {
+            appState.quiz.report.push({
+                question: q.questionText,
+                userAnswer: q.userAnswer,
+                answerKey: q.answerKey,
+                isCorrect: passed,
+                attempts: q.attempts,
+                solution: q.solution,
+                topic: appState.quiz.setup.topic
+            });
+        }
+
+        function nextQuestion() {
+            if (appState.quiz.currentQIndex < appState.quiz.questions.length - 1) {
+                appState.quiz.currentQIndex++;
+                setMessage(null);
+                renderView();
+            } else {
+                // End of quiz
+                setMessage('Quiz complete! Review your results in the Analyser.', 'teal-bg');
+                setTimeout(() => navigate('analyser'), 3000);
+            }
+        }
+
+        function previousQuestion() {
+            if (appState.quiz.currentQIndex > 0) {
+                appState.quiz.currentQIndex--;
+                setMessage(null);
+                renderView();
+            }
+        }
+        
+        function selectOption(option) {
+            const currentQ = appState.quiz.questions[appState.quiz.currentQIndex];
+            if (currentQ.attempts < 2) {
+                currentQ.userAnswer = option;
+                renderView();
+            }
+        }
+
+        function setMessage(msg, color = 'bg-red-600') {
+            appState.message = msg;
+            appState.messageColor = color;
+            renderView();
+        }
+
+        // Renderers for Quiz
+        function renderQuizSetup() {
+            const setup = appState.quiz.setup;
+            const exams = ['CBSE Boards', 'JEE', 'NEET', 'MIT', 'Olympiads', 'AP'];
+            const difficulties = ['Easy', 'Medium', 'Hard', 'Expert'];
+            const patterns = ['MCQ only', 'MCQ and subjective', 'Subjective only'];
+
+            const renderSelect = (label, id, options, selectedValue) => {
+                const optionsHtml = options.map(opt => `<option value="${opt}" ${opt === selectedValue ? 'selected' : ''}>${opt}</option>`).join('');
+                return `
+                    <div>
+                        <label for="${id}" class="block text-sm font-medium text-cream-text mb-1">${label}</label>
+                        <select id="${id}" onchange="updateQuizSetup('${id}', this.value)"
+                                class="w-full p-3 rounded-lg bg-gray-700 text-cream-text border-2 border-teal-bg focus:ring-teal-bg focus:border-teal-bg focus:outline-none appearance-none">
+                            ${optionsHtml}
+                        </select>
+                    </div>
+                `;
+            };
+
+            return `
+                <div class="p-6 primary-bg rounded-xl shadow-2xl space-y-6">
+                    <h2 class="text-3xl font-bold text-teal-bg">Setup Your AI Quiz</h2>
+                    <p class="text-gray-400">The AI will generate questions based on your specific requirements.</p>
+
+                    <!-- Input Fields -->
+                    ${renderInput('Topic', 'topic', setup.topic, 'e.g., $S_N2$ Reactions in Organic Chemistry', 'text', '', 'updateQuizSetup')}
+                    ${renderSelect('Difficulty', 'difficulty', difficulties, setup.difficulty)}
+                    ${renderSelect('Exam Standard', 'exam', exams, setup.exam)}
+                    ${renderInput('Number of Questions', 'numQuestions', setup.numQuestions, 'e.g., 10 (Max 30 recommended)', 'number', 'min="1" max="30"', 'updateQuizSetup')}
+                    ${renderSelect('Question Pattern', 'pattern', patterns, setup.pattern)}
+
+                    ${appState.message ? `<div class="p-3 mt-4 text-center rounded-lg font-semibold text-white ${appState.messageColor}">${appState.message}</div>` : ''}
+
+                    <button onclick="startQuiz()" class="w-full py-4 text-xl yellow-accent rounded-lg font-bold text-gray-900 yellow-hover transition duration-150">
+                        Generate & Start Quiz
+                    </button>
+                </div>
+            `;
+        }
+        
+        function renderQuizRun() {
+            const q = appState.quiz.questions[appState.quiz.currentQIndex];
+            const isCompleted = appState.quiz.questions.length > 0 && appState.quiz.currentQIndex >= appState.quiz.questions.length;
+            const totalQs = appState.quiz.questions.length;
+            
+            if (totalQs === 0) return `<div class="p-6 text-center text-gray-400">Go to Quiz Setup to start a quiz.</div>`;
+            if (isCompleted) return renderQuizCompleted();
+            if (!q) return renderLoadingScreen(); // Still generating or waiting for the first question
+
+            const optionsHtml = q.options ? q.options.map(option => {
+                const optionKey = option.split(')')[0].trim();
+                const isSelected = q.userAnswer === optionKey;
+                let optionClass = isSelected ? 'bg-blue-800 border-blue-500' : 'secondary-bg border-gray-700 hover:bg-gray-700';
+
+                // Post-check visual feedback
+                if (q.isCorrect === true && optionKey === q.answerKey) {
+                    optionClass = 'bg-green-700 border-green-500'; // Correct
+                } else if (q.isCorrect === false && isSelected) {
+                    optionClass = 'bg-red-700 border-red-500'; // Incorrect user selection
+                } else if (q.attempts === 2 && optionKey === q.answerKey) {
+                    optionClass = 'bg-green-900 border-green-600 opacity-70'; // Show correct after 2 fails
+                }
+
+
+                return `
+                    <button onclick="selectOption('${optionKey}')" 
+                            class="w-full text-left p-4 rounded-xl border-2 transition duration-150 ${optionClass}">
+                        <span class="text-xl">${option}</span>
+                    </button>
+                `;
+            }).join('') : `<textarea class="w-full h-32 p-3 rounded-lg bg-gray-700 text-cream-text border-2 border-teal-bg" placeholder="Enter your subjective answer..."></textarea>`;
+
+            const quizTimer = 120; // Hardcoded for now
+            
+            return `
+                <div class="p-6 primary-bg rounded-xl shadow-2xl space-y-8">
+                    <div class="flex justify-between items-center text-gray-400 border-b pb-3 border-gray-700">
+                        <span class="text-lg font-semibold">Q ${appState.quiz.currentQIndex + 1} of ${totalQs}</span>
+                        <div class="flex items-center space-x-2 text-sm">
+                            <span>${q.source}</span>
+                            <span class="px-2 py-1 rounded-full teal-bg text-white font-bold text-xs">
+                                ${appState.quiz.setup.difficulty}
+                            </span>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-yellow-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                            <span class="text-xl font-bold">${quizTimer}</span>
+                        </div>
+                    </div>
+                    
+                    <div class="min-h-[100px] text-xl leading-relaxed">
+                        ${q.questionText}
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        ${optionsHtml}
+                    </div>
+                    
+                    ${appState.message ? `<div class="p-3 mt-4 text-center rounded-lg font-semibold text-white ${appState.messageColor}">${appState.message}</div>` : ''}
+
+                    <div class="flex justify-center mt-6">
+                        <button class="px-6 py-3 yellow-accent rounded-lg font-bold text-gray-900 yellow-hover transition duration-150" 
+                                onclick="alert('Hint: ' + appState.quiz.questions[appState.quiz.currentQIndex].hint)">
+                            💡 View Hint
+                        </button>
+                    </div>
+
+                    <!-- Navigation and Check -->
+                    <div class="flex justify-between space-x-4 pt-4 border-t border-gray-700">
+                        <button onclick="previousQuestion()" 
+                                class="flex-1 py-3 secondary-bg rounded-lg text-white font-bold hover:bg-blue-800 transition duration-150 ${appState.quiz.currentQIndex === 0 ? 'opacity-50 cursor-not-allowed' : ''}" 
+                                ${appState.quiz.currentQIndex === 0 ? 'disabled' : ''}>
+                            Previous
+                        </button>
+                        <button onclick="checkAnswer()" 
+                                class="flex-1 py-3 secondary-bg rounded-lg text-white font-bold hover:bg-blue-800 transition duration-150">
+                            Check Answer
+                        </button>
+                        <button onclick="nextQuestion()" 
+                                class="flex-1 py-3 secondary-bg rounded-lg text-white font-bold hover:bg-blue-800 transition duration-150">
+                            Next
+                        </button>
+                    </div>
+                    
+                    ${q.attempts === 2 ? `
+                        <div class="mt-4 p-4 teal-bg rounded-lg">
+                            <h4 class="font-bold text-cream-text">Solution:</h4>
+                            <p class="text-gray-200 text-sm">${q.solution}</p>
+                        </div>
+                    ` : ''}
+
+                </div>
+            `;
+        }
+        
+        function renderQuizCompleted() {
+            const correctCount = appState.quiz.report.filter(r => r.isCorrect).length;
+            const totalCount = appState.quiz.report.length;
+            
+            return `
+                <div class="h-[60vh] flex flex-col items-center justify-center p-8 rounded-xl teal-bg shadow-xl">
+                    <h2 class="text-4xl font-extrabold text-cream-text mb-4">Quiz Finished! 🎉</h2>
+                    <p class="text-2xl text-white mb-6">You scored: ${correctCount} / ${totalCount}</p>
+                    <div class="space-x-4">
+                        <button onclick="navigate('analyser')" class="px-6 py-3 yellow-accent rounded-lg font-bold text-gray-900 yellow-hover transition duration-150">
+                            View Detailed Analysis
+                        </button>
+                        <button onclick="navigate('quiz_setup')" class="px-6 py-3 secondary-bg rounded-lg text-white font-bold hover:bg-blue-800 transition duration-150">
+                            Start New Quiz
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+
+        // 4. ANALYSER
+        async function runAnalysis() {
+            if (appState.quiz.report.length === 0) {
+                setMessage('No quiz data available. Complete a quiz first.', 'bg-red-600');
+                return;
+            }
+
+            setLoading(true, "AI is performing deep analysis on your quiz performance...");
+
+            const reportSummary = appState.quiz.report.map((item, index) => `
+                Q${index + 1}: Topic: ${item.topic}. User Answer: ${item.userAnswer}. Correct: ${item.isCorrect}. Solution: ${item.solution}
+            `).join('\n');
+
+            const analysisPrompt = `You are an expert academic tutor. Analyze the following quiz report and provide a detailed JSON response.
+            Focus on identifying the exact step, sub-micro concept, or pattern the student failed in for their incorrect questions.
+
+            Quiz Report:\n${reportSummary}
+
+            The JSON schema MUST be:
+            {
+                "overallFeedback": "...", // General summary and encouragement.
+                "problemAreas": [
+                    {
+                        "questionNumber": 1, // The question index (1-based)
+                        "analysis": "...", // Detailed, intuitive explanation of the failure point (e.g., 'Forgot to account for steric hindrance in the transition state').
+                        "conceptLack": "..." // The precise sub-micro concept that needs work (e.g., 'Steric hindrance effects on nucleophilicity').
+                    }
+                    // ... up to 3 most critical problem areas
+                ],
+                "approachSummary": "...", // General advice on how to find the crux of problems and the general way to solve them.
+                "conceptsMastered": ["..."]
+            }`;
+
+            try {
+                const jsonString = await fetchAIResponse(analysisPrompt);
+                let jsonContent = jsonString.trim();
+                if (jsonContent.startsWith('```json')) {
+                    jsonContent = jsonContent.substring(7, jsonContent.lastIndexOf('```')).trim();
+                }
+                const analysisResult = JSON.parse(jsonContent);
+
+                appState.analysisData.lastRun = new Date().toISOString();
+                appState.analysisData.score = `${appState.quiz.report.filter(r => r.isCorrect).length}/${appState.quiz.report.length}`;
+                appState.analysisData.problemAreas = analysisResult.problemAreas;
+                appState.analysisData.overallFeedback = analysisResult.overallFeedback;
+                appState.analysisData.approachSummary = analysisResult.approachSummary;
+                appState.analysisData.conceptsMastered = analysisResult.conceptsMastered;
+
+            } catch (error) {
+                setMessage("Analysis failed. AI could not generate or parse the analysis report.", 'bg-red-600');
+                console.error(error);
+            } finally {
+                setLoading(false);
+                renderView();
+            }
+        }
+
+        function renderAnalyser() {
+            if (appState.quiz.report.length === 0) {
+                return `
+                    <div class="p-6 secondary-bg rounded-xl shadow-2xl h-[40vh] flex flex-col items-center justify-center">
+                        <h2 class="text-3xl font-bold text-cream-text mb-4">No Data for Analysis</h2>
+                        <p class="text-lg text-gray-300">Please complete a quiz first to generate a performance report.</p>
+                        <button onclick="navigate('quiz_setup')" class="mt-6 px-6 py-3 yellow-accent rounded-lg font-bold text-gray-900 yellow-hover transition duration-150">
+                            Start Quiz
+                        </button>
+                    </div>
+                `;
+            }
+
+            const analysis = appState.analysisData;
+            
+            // Only show analysis if a report has been generated
+            if (!analysis.overallFeedback) {
+                return `
+                    <div class="p-6 primary-bg rounded-xl shadow-2xl space-y-6">
+                        <h2 class="text-3xl font-bold text-teal-bg">Performance Analyser</h2>
+                        <p class="text-gray-400">Quiz completed: ${appState.quiz.report.length} Questions.</p>
+                        <button onclick="runAnalysis()" class="w-full py-4 text-xl yellow-accent rounded-lg font-bold text-gray-900 yellow-hover transition duration-150">
+                            Run AI Deep Analysis
+                        </button>
+                        <div class="p-4 bg-gray-700 rounded-lg text-sm text-gray-400">
+                            The AI will analyze your solution steps for each question and identify the *exact* micro-concept you lack. This may take a moment.
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // Render Analysis Results
+            return `
+                <div class="p-6 primary-bg rounded-xl shadow-2xl space-y-8">
+                    <h2 class="text-3xl font-bold text-teal-bg">AI Analysis Report</h2>
+                    <div class="p-4 secondary-bg rounded-lg">
+                        <p class="text-xl font-bold text-cream-text">Overall Score: ${analysis.score}</p>
+                        <p class="text-gray-300 mt-2">${analysis.overallFeedback}</p>
+                    </div>
+
+                    <div class="space-y-4">
+                        <h3 class="text-2xl font-semibold text-yellow-accent border-b border-gray-700 pb-2">Critical Problem Areas</h3>
+                        ${analysis.problemAreas.map(item => `
+                            <div class="p-4 bg-gray-700 rounded-lg">
+                                <h4 class="font-bold text-lg text-red-400">Q${item.questionNumber} - Lack of Concept: ${item.conceptLack}</h4>
+                                <p class="text-gray-300 text-sm mt-1">Intuitive Approach/Failure Point: ${item.analysis}</p>
+                            </div>
+                        `).join('')}
+                    </div>
+                    
+                    <div>
+                        <h3 class="text-2xl font-semibold text-yellow-accent border-b border-gray-700 pb-2">Problem Solving Methodology</h3>
+                        <p class="text-gray-300 mt-3">${analysis.approachSummary}</p>
+                    </div>
+
+                    <div class="text-center pt-4 border-t border-gray-700">
+                        <button onclick="navigate('dps')" class="px-6 py-3 yellow-accent rounded-lg font-bold text-gray-900 yellow-hover transition duration-150">
+                            Start Dynamic Problem Solving (DPS)
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 5. Dynamic Problem Solving (DPS)
+        // DPS is essentially a Quiz where settings are pre-filled by the Analyser data
+        async function renderDPS() {
+            if (!appState.analysisData.overallFeedback) {
+                return `
+                    <div class="p-6 secondary-bg rounded-xl shadow-2xl h-[40vh] flex flex-col items-center justify-center">
+                        <h2 class="text-3xl font-bold text-cream-text mb-4">Run Analysis First</h2>
+                        <p class="text-lg text-gray-300">Dynamic Problem Solving requires a prior analysis report to target your weaknesses precisely.</p>
+                        <button onclick="navigate('analyser')" class="mt-6 px-6 py-3 yellow-accent rounded-lg font-bold text-gray-900 yellow-hover transition duration-150">
+                            Go to Analyser
+                        </button>
+                    </div>
+                `;
+            }
+
+            const targetConcepts = appState.analysisData.problemAreas.map(p => p.conceptLack).join(', ');
+            const dpsTopic = targetConcepts || appState.quiz.setup.topic;
+
+            // We only show the prompt and the result here, actual generation uses 'startQuiz' structure
+            return `
+                <div class="p-6 primary-bg rounded-xl shadow-2xl space-y-6">
+                    <h2 class="text-3xl font-bold text-teal-bg">Dynamic Problem Solving (DPS)</h2>
+                    <p class="text-gray-400">Problems are dynamically selected to target your precise points of failure.</p>
+
+                    <div class="p-4 bg-gray-700 rounded-lg">
+                        <h3 class="font-bold text-lg text-yellow-accent">Targeting Weaknesses:</h3>
+                        <p class="text-gray-300 text-sm mt-1">${dpsTopic}</p>
+                    </div>
+
+                    <button onclick="startDPSQuiz('${dpsTopic}')" class="w-full py-4 text-xl yellow-accent rounded-lg font-bold text-gray-900 yellow-hover transition duration-150">
+                        Generate & Start DPS (5 Questions)
+                    </button>
+                    
+                    <div class="p-4 bg-teal-900 rounded-lg text-sm text-gray-300">
+                        Upon completion of this DPS quiz, the AI will immediately check for mastery. If mastered, the system will move to more complex applications of the concept.
+                    </div>
+                </div>
+            `;
+        }
+
+        async function startDPSQuiz(topic) {
+            // Override quiz setup for DPS
+            appState.quiz.setup.topic = topic;
+            appState.quiz.setup.difficulty = 'Hard';
+            appState.quiz.setup.numQuestions = 5;
+            appState.quiz.setup.exam = 'DPS Target';
+            
+            // Re-use the main startQuiz function
+            await startQuiz();
+        }
+
+
+        // --- Initialization ---
+
+        // Set up the default view and start the flashcard timer
+        window.onload = function() {
+            renderView();
+            // Start the timer only when in Flashcard view and cards exist (mostly for debugging/initial load)
+            if (appState.currentView === 'flashcards' && appState.flashcards.length > 0) {
+                startFlashcardTimer();
+            }
+        };
+    </script>
+</body>
+</html>
