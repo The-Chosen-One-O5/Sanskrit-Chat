@@ -287,7 +287,7 @@
             `;
         }
         
-        // --- API Interaction/Simulation ---
+        // --- API Interaction/Simulation (FIXED FOR ROBUSTNESS) ---
 
         /**
          * Simulates a secure call to the Vercel Serverless Function.
@@ -306,21 +306,34 @@
                 });
 
                 if (!response.ok) {
+                    // Log the error status and retry
+                    console.error(`HTTP error! Status: ${response.status}. Response text: ${await response.text()}`);
                     throw new Error(`HTTP error! Status: ${response.status}`);
                 }
 
                 // Assuming the TypeGPT/Vercel endpoint returns a JSON with a 'text' field
                 const data = await response.json();
-                return data.text || data.response || data.content;
+                
+                // CRITICAL FIX: Ensure data is valid and contains the text field
+                const aiContent = data.text || data.response || data.content;
+
+                if (typeof aiContent === 'string' && aiContent.trim().length > 0) {
+                    return aiContent;
+                } else {
+                    // If response is OK but content is missing or not a string
+                    throw new Error("AI response content is empty or malformed.");
+                }
+
 
             } catch (error) {
-                console.error(`Attempt ${retryCount + 1} failed:`, error.message);
+                console.error(`AI Fetch Attempt ${retryCount + 1} failed:`, error.message);
                 if (retryCount < maxRetries) {
-                    setLoading(true, `AI failed to respond. Retrying in ${delay / 1000}s...`);
+                    setLoading(true, `AI failed to respond: ${error.message}. Retrying in ${delay / 1000}s...`);
                     await new Promise(resolve => setTimeout(resolve, delay));
                     return fetchAIResponse(prompt, retryCount + 1);
                 } else {
-                    throw new Error("AI service unavailable after multiple retries.");
+                    // Throw a final, clear error if all retries fail
+                    throw new Error("AI service unavailable after multiple retries. Check Vercel logs/API key.");
                 }
             }
         }
@@ -358,7 +371,7 @@
                 const aiResponse = await fetchAIResponse(fullPrompt);
                 chatHistory.push({ role: 'ai', text: aiResponse });
             } catch (error) {
-                chatHistory.push({ role: 'error', text: "Error connecting to AI service. Please try again." });
+                chatHistory.push({ role: 'error', text: "Error connecting to AI service. Please try again. Details: " + error.message });
                 console.error(error);
             } finally {
                 setLoading(false);
@@ -430,8 +443,15 @@
                 { "front": "...", "back": "..." }
             ]`;
 
+            let jsonString = '';
             try {
-                const jsonString = await fetchAIResponse(prompt);
+                jsonString = await fetchAIResponse(prompt);
+                
+                // Defensive check: ensure jsonString is actually a string before trimming
+                if (typeof jsonString !== 'string' || jsonString.trim().length === 0) {
+                     throw new Error("AI returned empty or invalid string for flashcards.");
+                }
+
                 let jsonContent = jsonString.trim();
                 // Check and strip markdown wrappers
                 if (jsonContent.startsWith('```json')) {
@@ -452,7 +472,12 @@
                 startFlashcardTimer();
 
             } catch (error) {
-                setMessage("Flashcard generation failed. AI could not generate or parse the content.", 'bg-red-600');
+                // If it fails due to JSON parsing or other internal errors
+                const detailedError = error.message.includes('JSON') 
+                    ? `JSON Parsing failed. Raw response: ${jsonString.substring(0, 100)}...` 
+                    : error.message;
+
+                setMessage(`Flashcard generation failed: ${detailedError}`, 'bg-red-600');
                 console.error("Flashcard Generation Error:", error);
                 setLoading(false);
             } finally {
@@ -697,9 +722,15 @@
                     "solution": "...",
                     "source": "${setup.exam} ${new Date().getFullYear()}"
                 }`;
-
+                
+                let jsonString = '';
                 try {
-                    const jsonString = await fetchAIResponse(prompt);
+                    jsonString = await fetchAIResponse(prompt);
+                    
+                    if (typeof jsonString !== 'string' || jsonString.trim().length === 0) {
+                         throw new Error("AI returned empty or invalid string for question.");
+                    }
+
                     // Attempt to parse the JSON string. The AI might wrap it in markdown.
                     let jsonContent = jsonString.trim();
                     if (jsonContent.startsWith('```json')) {
@@ -721,9 +752,10 @@
 
                 } catch (error) {
                     console.error("AI Generation Error or JSON Parse Error:", error);
-                    // If AI fails, the loop naturally continues to the next 'i' due to the retry logic in fetchAIResponse
-                    // If all retries fail, it throws, breaking the loop.
-                    setLoading(true, `AI failed to generate Q${i + 1}. Moving to next question...`);
+                    
+                    // If parsing or fetch failed due to API/JSON issue, we log it but continue the loop to try for the next question
+                    // If all retries inside fetchAIResponse failed, it will already have thrown the final error.
+                    setLoading(true, `AI failed to generate Q${i + 1}. Error: ${error.message}. Moving to next question...`);
                     await new Promise(resolve => setTimeout(resolve, 3000)); // Short pause before next attempt
                 }
             }
@@ -1000,9 +1032,15 @@
                 "approachSummary": "...", // General advice on how to find the crux of problems and the general way to solve them.
                 "conceptsMastered": ["..."]
             }`;
-
+            
+            let jsonString = '';
             try {
-                const jsonString = await fetchAIResponse(analysisPrompt);
+                jsonString = await fetchAIResponse(analysisPrompt);
+                
+                if (typeof jsonString !== 'string' || jsonString.trim().length === 0) {
+                     throw new Error("AI returned empty or invalid string for analysis.");
+                }
+
                 let jsonContent = jsonString.trim();
                 if (jsonContent.startsWith('```json')) {
                     jsonContent = jsonContent.substring(7, jsonContent.lastIndexOf('```')).trim();
@@ -1017,7 +1055,10 @@
                 appState.analysisData.conceptsMastered = analysisResult.conceptsMastered;
 
             } catch (error) {
-                setMessage("Analysis failed. AI could not generate or parse the analysis report.", 'bg-red-600');
+                const detailedError = error.message.includes('JSON') 
+                    ? `JSON Parsing failed. Raw response: ${jsonString.substring(0, 100)}...` 
+                    : error.message;
+                setMessage(`Analysis failed: ${detailedError}`, 'bg-red-600');
                 console.error(error);
             } finally {
                 setLoading(false);
@@ -1046,6 +1087,7 @@
                     <div class="p-6 primary-bg rounded-xl shadow-2xl space-y-6">
                         <h2 class="text-3xl font-bold text-teal-bg">Performance Analyser</h2>
                         <p class="text-gray-400">Quiz completed: ${appState.quiz.report.length} Questions.</p>
+                        ${appState.message ? `<div class="p-3 mt-4 text-center rounded-lg font-semibold text-white ${appState.messageColor}">${appState.message}</div>` : ''}
                         <button onclick="runAnalysis()" class="w-full py-4 text-xl yellow-accent rounded-lg font-bold text-gray-900 yellow-hover transition duration-150">
                             Run AI Deep Analysis
                         </button>
