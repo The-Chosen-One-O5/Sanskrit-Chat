@@ -1,0 +1,16 @@
+{
+  "rewrites": [
+    {
+      "source": "/",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/magic",
+      "destination": "/magic.html"
+    },
+    {
+      "source": "/api/translate",
+      "destination": "/api/translate"
+    }
+  ]
+}
