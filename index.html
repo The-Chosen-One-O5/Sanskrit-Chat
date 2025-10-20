@@ -28,6 +28,8 @@
     <link rel="manifest" href="/site.webmanifest" />
     
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Puter.js: serverless OpenRouter access in browser -->
+    <script src="https://js.puter.com/v2/"></script>
     <style>
         /* Custom styles for aesthetic appeal and responsiveness */
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
@@ -499,6 +501,33 @@
         // --- TRANSLATION LOGIC (Calls secure endpoint) ---
         
         async function callGroqApi(prompt) {
+            const PUTER_AVAILABLE = typeof window !== 'undefined' && window.puter && puter.ai && typeof puter.ai.chat === 'function';
+
+            const SYSTEM_INSTRUCTION = "You are an expert Sanskrit language translator. Translate the user's input (which may be English or Hinglish) into pure, correct Sanskrit using the Devanagari script. Do not include any explanation, commentary, or extra text, only the translated Sanskrit phrase.";
+            const buildPrompt = (text) => `${SYSTEM_INSTRUCTION}\n\nInput:\n${text}\n\nOutput (Sanskrit only):`;
+
+            const withTimeout = (p, ms, label = 'Operation') => new Promise((resolve, reject) => {
+                const t = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+                p.then(v => { clearTimeout(t); resolve(v); }, e => { clearTimeout(t); reject(e); });
+            });
+
+            const puterTranslate = async (model) => {
+                const res = await puter.ai.chat(buildPrompt(prompt), { model, temperature: 0.1 });
+                if (typeof res !== 'string' || !res.trim()) throw new Error('Empty response from Puter model ' + model);
+                return res.trim();
+            };
+
+            if (PUTER_AVAILABLE) {
+                try {
+                    const primary = withTimeout(puterTranslate('openrouter:grok-4-fast:free'), 6000, 'Grok-4-Fast translate');
+                    const delayedFallback = new Promise(resolve => setTimeout(resolve, 2000)).then(() => puterTranslate('openrouter:meta-llama/llama-3.1-8b-instruct'));
+                    const winner = await Promise.race([primary, delayedFallback]);
+                    return winner;
+                } catch (e) {
+                    console.warn('Puter translate failed, falling back to server endpoint:', e.message);
+                }
+            }
+
             const maxRetries = 3;
             let lastError = null;
             

@@ -1,0 +1,22 @@
+# Node/Vercel/Frontend common ignores
+node_modules/
+.vercel/
+.next/
+dist/
+build/
+.DS_Store
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.env
+.env.*
+coverage/
+.cache/
+*.local
+# Editors
+.vscode/
+.idea/
+# OS
+Thumbs.db
