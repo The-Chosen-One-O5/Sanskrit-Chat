@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Study Mentor</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://js.puter.com/v2/"></script>
     <script>
         // Configuration for MathJax to support LaTeX and mhchem for chemical formulas
         window.MathJax = {
@@ -142,6 +143,8 @@
         
         <p class="text-xs text-gray-500 mt-6">sanskrit-chat.vercel.app/magic</p>
     </div>
+
+    <button id="mobile-sidebar-toggle" class="fixed top-4 right-4 z-50 px-3 py-2 rounded-lg bg-teal-700 text-white shadow-lg md:hidden" onclick="toggleSidebar()">☰</button>
 
     <div id="content-area" class="min-h-screen p-8 transition-all duration-300" onmouseover="toggleSidebar(false)">
         <div class="max-w-4xl mx-auto">
@@ -287,6 +290,46 @@
             const maxRetries = 5;
             const delay = Math.pow(2, retryCount) * 1000; // Exponential backoff
 
+            // Prefer Puter.js in-browser AI to avoid server 500s and improve latency
+            const supportsPuterCreate = typeof window !== 'undefined' && window.puter && puter.ai && puter.ai.chat && puter.ai.chat.completions && typeof puter.ai.chat.completions.create === 'function';
+            const supportsPuterChatFn = typeof window !== 'undefined' && window.puter && puter.ai && typeof puter.ai.chat === 'function';
+            const withTimeout = (p, ms, label = 'Operation') => new Promise((resolve, reject) => {
+                const t = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+                p.then(v => { clearTimeout(t); resolve(v); }, e => { clearTimeout(t); reject(e); });
+            });
+
+            const puterCreate = async (model) => {
+                const resp = await puter.ai.chat.completions.create({
+                    model,
+                    messages: [
+                        { role: 'system', content: 'You are a helpful study mentor. Be concise and follow the user formatting requirements exactly. Respond with plain text or JSON as requested.' },
+                        { role: 'user', content: prompt }
+                    ],
+                    temperature: 0.5
+                });
+                const text = resp?.choices?.[0]?.message?.content;
+                if (!text || typeof text !== 'string') throw new Error('Empty response from Puter model ' + model);
+                return text.trim();
+            };
+
+            const puterLegacy = async (model) => {
+                const res = await puter.ai.chat(`You are a helpful study mentor. Follow the instructions and output exactly as requested.\n\n${prompt}`, { model, temperature: 0.5 });
+                if (typeof res !== 'string' || !res.trim()) throw new Error('Empty response from Puter model ' + model);
+                return res.trim();
+            };
+
+            if (supportsPuterCreate || supportsPuterChatFn) {
+                try {
+                    const use = supportsPuterCreate ? puterCreate : puterLegacy;
+                    const primary = withTimeout(use('openrouter:grok-4-fast:free'), 20000, 'Puter primary');
+                    const delayedFallback = new Promise(resolve => setTimeout(resolve, 2000)).then(() => use('openrouter:meta-llama/llama-3.1-8b-instruct'));
+                    const result = await Promise.race([primary, delayedFallback]);
+                    return result;
+                } catch (e) {
+                    console.warn('Puter AI failed, falling back to server endpoint:', e?.message || e);
+                }
+            }
+
             try {
                 const response = await fetch(API_ENDPOINT, {
                     method: 'POST',
@@ -315,8 +358,8 @@
                     throw new Error(`Failed to parse AI response as JSON. Check server logs/raw response in console.`);
                 }
 
-                // Assuming the TypeGPT/Vercel endpoint returns a JSON with a 'text' field
-                const aiContent = data.text || data.response || data.content;
+                // Try multiple common fields including 'sanskritText' if translate API is used
+                const aiContent = data.text || data.response || data.content || data.sanskritText;
 
                 if (typeof aiContent === 'string' && aiContent.trim().length > 0) {
                     return aiContent;
