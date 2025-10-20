@@ -501,30 +501,46 @@
         // --- TRANSLATION LOGIC (Calls secure endpoint) ---
         
         async function callGroqApi(prompt) {
-            const PUTER_AVAILABLE = typeof window !== 'undefined' && window.puter && puter.ai && typeof puter.ai.chat === 'function';
-
             const SYSTEM_INSTRUCTION = "You are an expert Sanskrit language translator. Translate the user's input (which may be English or Hinglish) into pure, correct Sanskrit using the Devanagari script. Do not include any explanation, commentary, or extra text, only the translated Sanskrit phrase.";
-            const buildPrompt = (text) => `${SYSTEM_INSTRUCTION}\n\nInput:\n${text}\n\nOutput (Sanskrit only):`;
+
+            const supportsPuterCreate = typeof window !== 'undefined' && window.puter && puter.ai && puter.ai.chat && puter.ai.chat.completions && typeof puter.ai.chat.completions.create === 'function';
+            const supportsPuterChatFn = typeof window !== 'undefined' && window.puter && puter.ai && typeof puter.ai.chat === 'function';
 
             const withTimeout = (p, ms, label = 'Operation') => new Promise((resolve, reject) => {
                 const t = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
                 p.then(v => { clearTimeout(t); resolve(v); }, e => { clearTimeout(t); reject(e); });
             });
 
-            const puterTranslate = async (model) => {
-                const res = await puter.ai.chat(buildPrompt(prompt), { model, temperature: 0.1 });
+            const puterTranslateCreate = async (model) => {
+                const resp = await puter.ai.chat.completions.create({
+                    model,
+                    messages: [
+                        { role: 'system', content: SYSTEM_INSTRUCTION },
+                        { role: 'user', content: prompt }
+                    ],
+                    temperature: 0.1,
+                    max_tokens: 100
+                });
+                const text = resp?.choices?.[0]?.message?.content;
+                if (!text || typeof text !== 'string') throw new Error('Empty response from Puter model ' + model);
+                return text.trim();
+            };
+
+            const puterTranslateLegacy = async (model) => {
+                const content = `${SYSTEM_INSTRUCTION}\n\nInput:\n${prompt}\n\nOutput (Sanskrit only):`;
+                const res = await puter.ai.chat(content, { model, temperature: 0.1 });
                 if (typeof res !== 'string' || !res.trim()) throw new Error('Empty response from Puter model ' + model);
                 return res.trim();
             };
 
-            if (PUTER_AVAILABLE) {
+            if (supportsPuterCreate || supportsPuterChatFn) {
                 try {
-                    const primary = withTimeout(puterTranslate('openrouter:grok-4-fast:free'), 6000, 'Grok-4-Fast translate');
-                    const delayedFallback = new Promise(resolve => setTimeout(resolve, 2000)).then(() => puterTranslate('openrouter:meta-llama/llama-3.1-8b-instruct'));
-                    const winner = await Promise.race([primary, delayedFallback]);
-                    return winner;
+                    const use = supportsPuterCreate ? puterTranslateCreate : puterTranslateLegacy;
+                    const primary = withTimeout(use('openrouter:grok-4-fast:free'), 7000, 'Grok-4-Fast translate');
+                    const delayedFallback = new Promise(resolve => setTimeout(resolve, 1500)).then(() => use('openrouter:meta-llama/llama-3.1-8b-instruct'));
+                    return await Promise.race([primary, delayedFallback]);
                 } catch (e) {
-                    console.warn('Puter translate failed, falling back to server endpoint:', e.message);
+                    console.warn('Puter translate failed, falling back to server endpoint:', e?.message || e);
                 }
             }
 
@@ -536,29 +552,37 @@
                     const response = await fetch(TRANSLATION_ENDPOINT, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ prompt: prompt })
+                        body: JSON.stringify({ prompt })
                     });
 
                     if (!response.ok) {
-                        const errorData = await response.json();
-                        throw new Error(`Endpoint error! Status: ${response.status}. Message: ${errorData.error}`);
+                        const errorText = await response.text().catch(() => '');
+                        throw new Error(`Endpoint error ${response.status}: ${errorText || response.statusText}`);
                     }
 
-                    const result = await response.json();
-                    const translatedText = result.sanskritText;
+                    // Safely parse JSON, surfacing raw body in case of failure
+                    const clone = response.clone();
+                    let data;
+                    try {
+                        data = await response.json();
+                    } catch (err) {
+                        const raw = await clone.text().catch(() => '');
+                        throw new Error(`Invalid JSON from server: ${raw.slice(0, 200)}`);
+                    }
+                    const translatedText = data.sanskritText || data.text || data.response || data.content;
                     
                     if (!translatedText) {
                         throw new Error("API response was empty or malformed.");
                     }
-                    return translatedText;
+                    return String(translatedText);
 
                 } catch (e) {
                     lastError = e;
-                    console.warn(`Attempt ${attempt + 1} failed:`, e.message);
+                    console.warn(`Attempt ${attempt + 1} failed: ${e.message}`);
                     await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
                 }
             }
-            throw new Error(`Translation failed after ${maxRetries} attempts. ${lastError.message}`);
+            throw new Error(`Translation failed after ${maxRetries} attempts. ${lastError?.message || lastError}`);
         }
 
         async function translateAndSendMessage(originalText) {
