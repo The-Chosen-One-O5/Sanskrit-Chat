@@ -1194,13 +1194,21 @@
         let activeEmojiPicker = null;
 
         async function toggleReaction(messageId, emoji) {
-            if (!db || !currentRoomCode || !userId) return;
+            if (!db || !currentRoomCode || !userId) {
+                console.error("toggleReaction: Missing required data", { db: !!db, currentRoomCode, userId });
+                return;
+            }
             
             const messageRef = doc(db, `artifacts/${appId}/public/data/sanskrit_rooms`, currentRoomCode, 'messages', messageId);
             
             try {
+                console.log(`toggleReaction: Attempting to toggle ${emoji} on message ${messageId}`);
+                
                 const messageSnap = await getDoc(messageRef);
-                if (!messageSnap.exists()) return;
+                if (!messageSnap.exists()) {
+                    console.error("toggleReaction: Message not found", messageId);
+                    return;
+                }
                 
                 const messageData = messageSnap.data();
                 const reactions = messageData.reactions || {};
@@ -1210,9 +1218,11 @@
                 if (reactors.includes(userId)) {
                     // Remove user's reaction
                     updatedReactors = reactors.filter(uid => uid !== userId);
+                    console.log(`toggleReaction: Removing ${emoji} reaction from user ${userId}`);
                 } else {
                     // Add user's reaction
                     updatedReactors = [...reactors, userId];
+                    console.log(`toggleReaction: Adding ${emoji} reaction for user ${userId}`);
                 }
                 
                 // Update or remove emoji key
@@ -1223,13 +1233,33 @@
                     delete updatedReactions[emoji];
                 }
                 
+                console.log("toggleReaction: Updating Firestore with reactions:", updatedReactions);
+                
                 await updateDoc(messageRef, {
                     reactions: updatedReactions
                 });
                 
+                console.log("toggleReaction: Successfully updated reaction");
+                
             } catch (e) {
-                console.error("Failed to toggle reaction:", e);
-                showError("Could not update reaction. Please try again.");
+                console.error("toggleReaction: Failed to toggle reaction:", e);
+                console.error("toggleReaction: Error code:", e.code);
+                console.error("toggleReaction: Error message:", e.message);
+                console.error("toggleReaction: Message ID:", messageId);
+                console.error("toggleReaction: Room code:", currentRoomCode);
+                console.error("toggleReaction: User ID:", userId);
+                
+                // Provide specific error messages based on error code
+                let errorMessage = "Could not update reaction. Please try again.";
+                if (e.code === 'permission-denied') {
+                    errorMessage = "Permission denied. Please ensure Firestore rules are deployed correctly.";
+                } else if (e.code === 'not-found') {
+                    errorMessage = "Message not found. It may have been deleted.";
+                } else if (e.code === 'unavailable') {
+                    errorMessage = "Network error. Check your internet connection.";
+                }
+                
+                showError(errorMessage);
             }
         }
 

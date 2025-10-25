@@ -41,6 +41,34 @@ The app relies on the `/api/translate` serverless function as a proxy for OpenAI
 
 Both HTML entry points depend on Firebase Firestore and Auth. Ensure environment configuration (`__firebase_config`) is passed via Vercel or replaced with your own project credentials when self-hosting.
 
+### Firestore Security Rules
+
+The application requires Firestore security rules to be deployed for proper functionality. Deploy the `firestore.rules` file to your Firebase project:
+
+1. Go to [Firebase Console](https://console.firebase.google.com/)
+2. Select your project
+3. Navigate to **Firestore Database** → **Rules** tab
+4. Copy content from `firestore.rules` and paste into the editor
+5. Click **Publish**
+
+These rules enable:
+- Message reactions (emoji responses)
+- Read receipts (message read status)
+- Room creation and deletion
+- Secure message storage
+
+See `FIRESTORE_RULES_SETUP.md` for detailed deployment instructions.
+
+### Firebase Storage Rules
+
+For image sharing functionality, deploy the `storage.rules` file:
+
+1. Go to **Storage** → **Rules** tab in Firebase Console
+2. Copy content from `storage.rules` and paste
+3. Click **Publish**
+
+See `FIREBASE_STORAGE_SETUP.md` for more details.
+
 ---
 
 For more detailed architecture information, refer to inline comments within `index.html` and `magic.html`.
