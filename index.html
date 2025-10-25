@@ -265,7 +265,6 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, collection, addDoc, onSnapshot, serverTimestamp, query, orderBy, getDoc, setDoc, where, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
 
         // --- CONSTANTS ---
         // Vercel Serverless Function Endpoint for Translation
@@ -300,7 +299,6 @@
         
         let db;
         let auth;
-        let storage;
         let userId = null;
         let userName = '';
         let currentState = STATE.NAME_INPUT;
@@ -383,19 +381,12 @@
             try {
                 console.log('Initializing Firebase with config:', {
                     projectId: firebaseConfig.projectId,
-                    storageBucket: firebaseConfig.storageBucket,
                     authDomain: firebaseConfig.authDomain
                 });
                 
                 const app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
                 auth = getAuth(app);
-                storage = getStorage(app);
-                
-                console.log('Firebase Storage initialized:', storage ? 'success' : 'failed');
-                if (storage) {
-                    console.log('Storage bucket:', storage.app.options.storageBucket);
-                }
                 
                 await new Promise(resolve => {
                     onAuthStateChanged(auth, async (user) => {
@@ -900,12 +891,6 @@
                 return;
             }
 
-            if (!storage) {
-                console.error('uploadImageMessage: Firebase Storage not initialized');
-                showError('Storage not initialized. Please refresh the page.');
-                return;
-            }
-
             if (!currentRoomCode) {
                 console.error('uploadImageMessage: No current room code');
                 showError('Not in a chat room. Please join a room first.');
@@ -916,47 +901,47 @@
 
             try {
                 console.log('uploadImageMessage: Starting compression...');
-                const timestamp = Date.now();
                 const originalFileName = file.name;
 
                 const compressedBlob = await compressImage(file);
                 console.log('uploadImageMessage: Compression complete. Compressed size:', compressedBlob.size);
 
-                const thumbnailBlob = await generateThumbnail(file);
-                console.log('uploadImageMessage: Thumbnail generated. Size:', thumbnailBlob.size);
-
-                const imagePath = `rooms/${currentRoomCode}/images/${timestamp}-${userId}`;
-                const thumbnailPath = `rooms/${currentRoomCode}/images/thumbnails/${timestamp}-${userId}`;
-
-                console.log('uploadImageMessage: Creating storage references...');
-                console.log('uploadImageMessage: Image path:', imagePath);
-                console.log('uploadImageMessage: Thumbnail path:', thumbnailPath);
-
-                const imageRef = ref(storage, imagePath);
-                const thumbnailRef = ref(storage, thumbnailPath);
-
-                console.log('uploadImageMessage: Uploading full image to Firebase Storage...');
-                await uploadBytes(imageRef, compressedBlob, {
-                    contentType: file.type,
-                    customMetadata: {
-                        originalFileName: originalFileName,
-                        uploadedBy: userId,
-                        userName: userName
-                    }
+                console.log('uploadImageMessage: Converting image to base64...');
+                const base64Image = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                        const base64 = reader.result.split(',')[1];
+                        resolve(base64);
+                    };
+                    reader.onerror = reject;
+                    reader.readAsDataURL(compressedBlob);
                 });
-                console.log('uploadImageMessage: Full image uploaded successfully');
 
-                console.log('uploadImageMessage: Uploading thumbnail to Firebase Storage...');
-                await uploadBytes(thumbnailRef, thumbnailBlob, {
-                    contentType: 'image/jpeg'
+                console.log('uploadImageMessage: Uploading to imgbb...');
+                const uploadResponse = await fetch('/api/upload-image', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ image: base64Image })
                 });
-                console.log('uploadImageMessage: Thumbnail uploaded successfully');
 
-                console.log('uploadImageMessage: Getting download URLs...');
-                const imageUrl = await getDownloadURL(imageRef);
+                if (!uploadResponse.ok) {
+                    const errorData = await uploadResponse.json().catch(() => ({ error: 'Upload failed' }));
+                    throw new Error(errorData.error || `Upload failed with status ${uploadResponse.status}`);
+                }
+
+                const uploadData = await uploadResponse.json();
+                console.log('uploadImageMessage: Upload successful');
+
+                if (!uploadData.data || !uploadData.data.url) {
+                    throw new Error('Invalid response from upload service');
+                }
+
+                const imageUrl = uploadData.data.url;
+                const thumbnailUrl = uploadData.data.thumb?.url || imageUrl;
+
                 console.log('uploadImageMessage: Full image URL:', imageUrl);
-                
-                const thumbnailUrl = await getDownloadURL(thumbnailRef);
                 console.log('uploadImageMessage: Thumbnail URL:', thumbnailUrl);
 
                 console.log('uploadImageMessage: Writing message to Firestore...');
@@ -971,7 +956,8 @@
                     userId: userId,
                     userName: userName,
                     timestamp: serverTimestamp(),
-                    readBy: {}
+                    readBy: {},
+                    reactions: {}
                 });
 
                 console.log('uploadImageMessage: Image uploaded and message saved successfully!');
@@ -980,16 +966,12 @@
                 console.error('uploadImageMessage: Error during upload:', e);
                 console.error('uploadImageMessage: Error name:', e.name);
                 console.error('uploadImageMessage: Error message:', e.message);
-                console.error('uploadImageMessage: Error code:', e.code);
-                console.error('uploadImageMessage: Error stack:', e.stack);
                 
                 let errorMessage = 'Failed to upload image';
-                if (e.code === 'storage/unauthorized') {
-                    errorMessage = 'Permission denied. Please check Firebase Storage rules.';
-                } else if (e.code === 'storage/canceled') {
-                    errorMessage = 'Upload was cancelled.';
-                } else if (e.code === 'storage/unknown') {
-                    errorMessage = 'Unknown storage error. Check console for details.';
+                if (e.message.includes('imgbb')) {
+                    errorMessage = `Image upload service error: ${e.message}`;
+                } else if (e.message.includes('network') || e.message.includes('fetch')) {
+                    errorMessage = 'Network error. Please check your internet connection.';
                 } else if (e.message) {
                     errorMessage = `Failed to upload image: ${e.message}`;
                 }
