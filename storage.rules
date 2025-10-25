@@ -1,0 +1,38 @@
+rules_version = '2';
+
+// Firebase Storage Security Rules for Sanskrit Universal Chat
+// These rules need to be deployed to Firebase Storage via Firebase Console
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Allow authenticated users to upload and read images in their rooms
+    match /rooms/{roomCode}/images/{imageFile} {
+      // Allow authenticated users to read any image in any room
+      allow read: if request.auth != null;
+      
+      // Allow authenticated users to upload images
+      // Validate file size (max 10MB) and content type
+      allow write: if request.auth != null
+                   && request.resource.size < 10 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+    }
+    
+    // Allow authenticated users to upload and read thumbnails
+    match /rooms/{roomCode}/images/thumbnails/{thumbnailFile} {
+      // Allow authenticated users to read any thumbnail
+      allow read: if request.auth != null;
+      
+      // Allow authenticated users to upload thumbnails
+      // Validate file size (max 2MB for thumbnails) and content type
+      allow write: if request.auth != null
+                   && request.resource.size < 2 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+    }
+    
+    // Deny all other access by default
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

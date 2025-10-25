@@ -279,7 +279,7 @@
             apiKey: "AIzaSyDK_RPUQaQ86dzRhOOrrzRvRcG5pMyHR_E",
             authDomain: "sanskrit-chat.firebaseapp.com",
             projectId: "sanskrit-chat",
-            storageBucket: "sanskrit-chat.firebasestorage.app",
+            storageBucket: "sanskrit-chat.appspot.com",
             messagingSenderId: "328437332405",
             appId: "1:328437332405:web:ffd31f848b2351501fc1fc",
             measurementId: "G-X14R907GQB"
@@ -381,10 +381,21 @@
             }
             
             try {
+                console.log('Initializing Firebase with config:', {
+                    projectId: firebaseConfig.projectId,
+                    storageBucket: firebaseConfig.storageBucket,
+                    authDomain: firebaseConfig.authDomain
+                });
+                
                 const app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
                 auth = getAuth(app);
                 storage = getStorage(app);
+                
+                console.log('Firebase Storage initialized:', storage ? 'success' : 'failed');
+                if (storage) {
+                    console.log('Storage bucket:', storage.app.options.storageBucket);
+                }
                 
                 await new Promise(resolve => {
                     onAuthStateChanged(auth, async (user) => {
@@ -752,10 +763,13 @@
 
         async function compressImage(file, maxWidth = 1920, quality = 0.85) {
             return new Promise((resolve, reject) => {
+                console.log('compressImage: Starting compression for:', file.name);
                 const reader = new FileReader();
                 reader.onload = (e) => {
+                    console.log('compressImage: File read successfully, loading image...');
                     const img = new window.Image();
                     img.onload = () => {
+                        console.log('compressImage: Image loaded. Original dimensions:', img.width, 'x', img.height);
                         const canvas = document.createElement('canvas');
                         let width = img.width;
                         let height = img.height;
@@ -767,32 +781,50 @@
 
                         canvas.width = width;
                         canvas.height = height;
+                        console.log('compressImage: Canvas dimensions:', width, 'x', height);
 
                         const ctx = canvas.getContext('2d');
+                        if (!ctx) {
+                            console.error('compressImage: Failed to get 2D context');
+                            reject(new Error('Failed to get canvas context'));
+                            return;
+                        }
+                        
                         ctx.drawImage(img, 0, 0, width, height);
 
                         canvas.toBlob((blob) => {
                             if (blob) {
+                                console.log('compressImage: Blob created successfully. Size:', blob.size);
                                 resolve(blob);
                             } else {
-                                reject(new Error('Failed to compress image'));
+                                console.error('compressImage: Failed to create blob');
+                                reject(new Error('Failed to compress image - blob creation failed'));
                             }
                         }, file.type === 'image/png' ? 'image/png' : 'image/jpeg', quality);
                     };
-                    img.onerror = () => reject(new Error('Failed to load image'));
+                    img.onerror = (error) => {
+                        console.error('compressImage: Failed to load image:', error);
+                        reject(new Error('Failed to load image for compression'));
+                    };
                     img.src = e.target.result;
                 };
-                reader.onerror = () => reject(new Error('Failed to read file'));
+                reader.onerror = (error) => {
+                    console.error('compressImage: Failed to read file:', error);
+                    reject(new Error('Failed to read file for compression'));
+                };
                 reader.readAsDataURL(file);
             });
         }
 
         async function generateThumbnail(file, maxSize = 300) {
             return new Promise((resolve, reject) => {
+                console.log('generateThumbnail: Starting thumbnail generation for:', file.name);
                 const reader = new FileReader();
                 reader.onload = (e) => {
+                    console.log('generateThumbnail: File read successfully, loading image...');
                     const img = new window.Image();
                     img.onload = () => {
+                        console.log('generateThumbnail: Image loaded. Original dimensions:', img.width, 'x', img.height);
                         const canvas = document.createElement('canvas');
                         let width = img.width;
                         let height = img.height;
@@ -811,56 +843,99 @@
 
                         canvas.width = width;
                         canvas.height = height;
+                        console.log('generateThumbnail: Thumbnail dimensions:', width, 'x', height);
 
                         const ctx = canvas.getContext('2d');
+                        if (!ctx) {
+                            console.error('generateThumbnail: Failed to get 2D context');
+                            reject(new Error('Failed to get canvas context'));
+                            return;
+                        }
+                        
                         ctx.drawImage(img, 0, 0, width, height);
 
                         canvas.toBlob((blob) => {
                             if (blob) {
+                                console.log('generateThumbnail: Thumbnail blob created successfully. Size:', blob.size);
                                 resolve(blob);
                             } else {
-                                reject(new Error('Failed to generate thumbnail'));
+                                console.error('generateThumbnail: Failed to create thumbnail blob');
+                                reject(new Error('Failed to generate thumbnail - blob creation failed'));
                             }
                         }, 'image/jpeg', 0.7);
                     };
-                    img.onerror = () => reject(new Error('Failed to load image for thumbnail'));
+                    img.onerror = (error) => {
+                        console.error('generateThumbnail: Failed to load image:', error);
+                        reject(new Error('Failed to load image for thumbnail generation'));
+                    };
                     img.src = e.target.result;
                 };
-                reader.onerror = () => reject(new Error('Failed to read file'));
+                reader.onerror = (error) => {
+                    console.error('generateThumbnail: Failed to read file:', error);
+                    reject(new Error('Failed to read file for thumbnail generation'));
+                };
                 reader.readAsDataURL(file);
             });
         }
 
         async function uploadImageMessage(file) {
-            if (!file) return;
+            if (!file) {
+                console.error('uploadImageMessage: No file provided');
+                return;
+            }
+
+            console.log('uploadImageMessage: Starting upload for file:', file.name, 'type:', file.type, 'size:', file.size);
 
             const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
             if (!validTypes.includes(file.type)) {
                 showError('Please select a valid image file (JPEG, PNG, WebP, or GIF)');
+                console.error('uploadImageMessage: Invalid file type:', file.type);
                 return;
             }
 
             const maxSize = 10 * 1024 * 1024;
             if (file.size > maxSize) {
                 showError('Image file is too large. Maximum size is 10MB.');
+                console.error('uploadImageMessage: File too large:', file.size);
+                return;
+            }
+
+            if (!storage) {
+                console.error('uploadImageMessage: Firebase Storage not initialized');
+                showError('Storage not initialized. Please refresh the page.');
+                return;
+            }
+
+            if (!currentRoomCode) {
+                console.error('uploadImageMessage: No current room code');
+                showError('Not in a chat room. Please join a room first.');
                 return;
             }
 
             showLoading();
 
             try {
+                console.log('uploadImageMessage: Starting compression...');
                 const timestamp = Date.now();
                 const originalFileName = file.name;
 
                 const compressedBlob = await compressImage(file);
+                console.log('uploadImageMessage: Compression complete. Compressed size:', compressedBlob.size);
+
                 const thumbnailBlob = await generateThumbnail(file);
+                console.log('uploadImageMessage: Thumbnail generated. Size:', thumbnailBlob.size);
 
                 const imagePath = `rooms/${currentRoomCode}/images/${timestamp}-${userId}`;
                 const thumbnailPath = `rooms/${currentRoomCode}/images/thumbnails/${timestamp}-${userId}`;
 
+                console.log('uploadImageMessage: Creating storage references...');
+                console.log('uploadImageMessage: Image path:', imagePath);
+                console.log('uploadImageMessage: Thumbnail path:', thumbnailPath);
+
                 const imageRef = ref(storage, imagePath);
                 const thumbnailRef = ref(storage, thumbnailPath);
 
+                console.log('uploadImageMessage: Uploading full image to Firebase Storage...');
                 await uploadBytes(imageRef, compressedBlob, {
                     contentType: file.type,
                     customMetadata: {
@@ -869,14 +944,22 @@
                         userName: userName
                     }
                 });
+                console.log('uploadImageMessage: Full image uploaded successfully');
 
+                console.log('uploadImageMessage: Uploading thumbnail to Firebase Storage...');
                 await uploadBytes(thumbnailRef, thumbnailBlob, {
                     contentType: 'image/jpeg'
                 });
+                console.log('uploadImageMessage: Thumbnail uploaded successfully');
 
+                console.log('uploadImageMessage: Getting download URLs...');
                 const imageUrl = await getDownloadURL(imageRef);
+                console.log('uploadImageMessage: Full image URL:', imageUrl);
+                
                 const thumbnailUrl = await getDownloadURL(thumbnailRef);
+                console.log('uploadImageMessage: Thumbnail URL:', thumbnailUrl);
 
+                console.log('uploadImageMessage: Writing message to Firestore...');
                 const messagesRef = collection(db, `artifacts/${appId}/public/data/sanskrit_rooms`, currentRoomCode, 'messages');
 
                 await addDoc(messagesRef, {
@@ -891,11 +974,27 @@
                     readBy: {}
                 });
 
-                console.log('Image uploaded successfully');
+                console.log('uploadImageMessage: Image uploaded and message saved successfully!');
 
             } catch (e) {
-                console.error('Failed to upload image:', e);
-                showError(`Failed to upload image: ${e.message}`);
+                console.error('uploadImageMessage: Error during upload:', e);
+                console.error('uploadImageMessage: Error name:', e.name);
+                console.error('uploadImageMessage: Error message:', e.message);
+                console.error('uploadImageMessage: Error code:', e.code);
+                console.error('uploadImageMessage: Error stack:', e.stack);
+                
+                let errorMessage = 'Failed to upload image';
+                if (e.code === 'storage/unauthorized') {
+                    errorMessage = 'Permission denied. Please check Firebase Storage rules.';
+                } else if (e.code === 'storage/canceled') {
+                    errorMessage = 'Upload was cancelled.';
+                } else if (e.code === 'storage/unknown') {
+                    errorMessage = 'Unknown storage error. Check console for details.';
+                } else if (e.message) {
+                    errorMessage = `Failed to upload image: ${e.message}`;
+                }
+                
+                showError(errorMessage);
             } finally {
                 hideLoading();
             }
