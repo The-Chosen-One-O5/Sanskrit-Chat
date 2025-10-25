@@ -81,6 +81,155 @@
         #drop-overlay {
             backdrop-filter: blur(4px);
         }
+        
+        /* Emoji Reactions Styles */
+        .message-wrapper {
+            position: relative;
+        }
+        
+        .reaction-trigger {
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+        
+        .message-wrapper:hover .reaction-trigger {
+            opacity: 1;
+        }
+        
+        .emoji-picker-popup {
+            position: absolute;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            padding: 8px;
+            z-index: 100;
+            animation: fadeInScale 0.2s ease;
+        }
+        
+        @keyframes fadeInScale {
+            from {
+                opacity: 0;
+                transform: scale(0.9);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+        
+        .emoji-picker-button {
+            font-size: 24px;
+            padding: 6px 10px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: background-color 0.2s ease, transform 0.1s ease;
+        }
+        
+        .emoji-picker-button:hover {
+            background-color: #f3f4f6;
+            transform: scale(1.1);
+        }
+        
+        .emoji-picker-button:active {
+            transform: scale(0.95);
+        }
+        
+        .reactions-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: 6px;
+        }
+        
+        .reaction-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 8px;
+            background: #f3f4f6;
+            border: 1.5px solid transparent;
+            border-radius: 12px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            animation: reactionPop 0.3s ease;
+        }
+        
+        @keyframes reactionPop {
+            0% {
+                transform: scale(0);
+                opacity: 0;
+            }
+            50% {
+                transform: scale(1.1);
+            }
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+        
+        .reaction-item:hover {
+            background: #e5e7eb;
+            transform: scale(1.05);
+        }
+        
+        .reaction-item.user-reacted {
+            background: #dbeafe;
+            border-color: #3b82f6;
+        }
+        
+        .reaction-item.user-reacted:hover {
+            background: #bfdbfe;
+        }
+        
+        .reaction-emoji {
+            font-size: 16px;
+            line-height: 1;
+        }
+        
+        .reaction-count {
+            font-size: 12px;
+            font-weight: 600;
+            color: #374151;
+        }
+        
+        .add-reaction-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            background: #f3f4f6;
+            border: 1.5px dashed #9ca3af;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-size: 16px;
+            color: #6b7280;
+        }
+        
+        .add-reaction-btn:hover {
+            background: #e5e7eb;
+            border-color: #6b7280;
+            transform: scale(1.05);
+        }
+        
+        /* Mobile long-press feedback */
+        .message-wrapper.long-press-active {
+            animation: pulse 0.3s ease;
+        }
+        
+        @keyframes pulse {
+            0%, 100% {
+                transform: scale(1);
+            }
+            50% {
+                transform: scale(0.98);
+            }
+        }
     </style>
 </head>
 <body class="app-container">
@@ -940,6 +1089,191 @@
             return '';
         }
 
+        // --- EMOJI REACTIONS LOGIC ---
+
+        const COMMON_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🎉', '🔥', '💯', '👏', '🙌', '✨'];
+        let activeEmojiPicker = null;
+
+        async function toggleReaction(messageId, emoji) {
+            if (!db || !currentRoomCode || !userId) return;
+            
+            const messageRef = doc(db, `artifacts/${appId}/public/data/sanskrit_rooms`, currentRoomCode, 'messages', messageId);
+            
+            try {
+                const messageSnap = await getDoc(messageRef);
+                if (!messageSnap.exists()) return;
+                
+                const messageData = messageSnap.data();
+                const reactions = messageData.reactions || {};
+                const reactors = reactions[emoji] || [];
+                
+                let updatedReactors;
+                if (reactors.includes(userId)) {
+                    // Remove user's reaction
+                    updatedReactors = reactors.filter(uid => uid !== userId);
+                } else {
+                    // Add user's reaction
+                    updatedReactors = [...reactors, userId];
+                }
+                
+                // Update or remove emoji key
+                const updatedReactions = { ...reactions };
+                if (updatedReactors.length > 0) {
+                    updatedReactions[emoji] = updatedReactors;
+                } else {
+                    delete updatedReactions[emoji];
+                }
+                
+                await updateDoc(messageRef, {
+                    reactions: updatedReactions
+                });
+                
+            } catch (e) {
+                console.error("Failed to toggle reaction:", e);
+                showError("Could not update reaction. Please try again.");
+            }
+        }
+
+        function showEmojiPicker(messageId, triggerElement) {
+            // Close any existing picker
+            closeEmojiPicker();
+            
+            const picker = document.createElement('div');
+            picker.className = 'emoji-picker-popup';
+            picker.id = 'active-emoji-picker';
+            
+            picker.innerHTML = COMMON_EMOJIS.map(emoji => 
+                `<button class="emoji-picker-button" data-emoji="${emoji}">${emoji}</button>`
+            ).join('');
+            
+            // Position picker near the trigger
+            const triggerRect = triggerElement.getBoundingClientRect();
+            const messageWrapper = triggerElement.closest('.message-wrapper');
+            const isMine = messageWrapper?.classList.contains('message-mine');
+            
+            document.body.appendChild(picker);
+            
+            // Position the picker
+            const pickerRect = picker.getBoundingClientRect();
+            let top = triggerRect.bottom + window.scrollY + 5;
+            let left = triggerRect.left + window.scrollX;
+            
+            // Adjust if picker goes off-screen
+            if (left + pickerRect.width > window.innerWidth) {
+                left = window.innerWidth - pickerRect.width - 10;
+            }
+            if (top + pickerRect.height > window.innerHeight + window.scrollY) {
+                top = triggerRect.top + window.scrollY - pickerRect.height - 5;
+            }
+            
+            picker.style.position = 'absolute';
+            picker.style.top = `${top}px`;
+            picker.style.left = `${left}px`;
+            
+            // Add click handlers for emoji selection
+            picker.querySelectorAll('.emoji-picker-button').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const emoji = btn.getAttribute('data-emoji');
+                    toggleReaction(messageId, emoji);
+                    closeEmojiPicker();
+                });
+            });
+            
+            activeEmojiPicker = picker;
+            
+            // Close picker when clicking outside
+            setTimeout(() => {
+                document.addEventListener('click', closeEmojiPicker);
+            }, 100);
+        }
+
+        function closeEmojiPicker() {
+            if (activeEmojiPicker) {
+                activeEmojiPicker.remove();
+                activeEmojiPicker = null;
+                document.removeEventListener('click', closeEmojiPicker);
+            }
+        }
+
+        function showReactionTooltip(emoji, userIds, targetElement) {
+            // Remove any existing tooltip
+            const existingTooltip = document.getElementById('reaction-tooltip');
+            if (existingTooltip) existingTooltip.remove();
+            
+            const userNames = userIds.map(uid => {
+                if (uid === userId) return 'You';
+                const userMsg = messages.find(m => m.userId === uid);
+                return userMsg?.userName || 'Unknown User';
+            });
+            
+            const tooltip = document.createElement('div');
+            tooltip.id = 'reaction-tooltip';
+            tooltip.className = 'fixed bg-gray-800 text-white text-xs px-3 py-2 rounded-lg shadow-lg z-50 max-w-xs';
+            tooltip.style.pointerEvents = 'none';
+            
+            tooltip.innerHTML = `
+                <div class="font-semibold mb-1">${emoji}</div>
+                <div>${userNames.join(', ')}</div>
+            `;
+            
+            document.body.appendChild(tooltip);
+            
+            const targetRect = targetElement.getBoundingClientRect();
+            const tooltipRect = tooltip.getBoundingClientRect();
+            
+            let top = targetRect.top + window.scrollY - tooltipRect.height - 8;
+            let left = targetRect.left + window.scrollX + (targetRect.width / 2) - (tooltipRect.width / 2);
+            
+            // Adjust if tooltip goes off-screen
+            if (left < 10) left = 10;
+            if (left + tooltipRect.width > window.innerWidth - 10) {
+                left = window.innerWidth - tooltipRect.width - 10;
+            }
+            if (top < 10) {
+                top = targetRect.bottom + window.scrollY + 8;
+            }
+            
+            tooltip.style.top = `${top}px`;
+            tooltip.style.left = `${left}px`;
+            
+            return tooltip;
+        }
+
+        function hideReactionTooltip() {
+            const tooltip = document.getElementById('reaction-tooltip');
+            if (tooltip) tooltip.remove();
+        }
+
+        function renderReactions(message) {
+            if (!message.reactions || Object.keys(message.reactions).length === 0) {
+                return '';
+            }
+            
+            const reactionItems = Object.entries(message.reactions)
+                .filter(([emoji, userIds]) => userIds.length > 0)
+                .map(([emoji, userIds]) => {
+                    const userReacted = userIds.includes(userId);
+                    const count = userIds.length;
+                    return `
+                        <div class="reaction-item ${userReacted ? 'user-reacted' : ''}" 
+                             data-message-id="${message.id}" 
+                             data-emoji="${emoji}"
+                             data-user-ids="${userIds.join(',')}">
+                            <span class="reaction-emoji">${emoji}</span>
+                            <span class="reaction-count">${count}</span>
+                        </div>
+                    `;
+                }).join('');
+            
+            return `
+                <div class="reactions-container">
+                    ${reactionItems}
+                    <div class="add-reaction-btn" data-message-id="${message.id}">➕</div>
+                </div>
+            `;
+        }
+
         function showMessageInfo(message) {
             const readByEntries = message.readBy ? Object.entries(message.readBy) : [];
             const readByList = readByEntries.length > 0
@@ -1350,52 +1684,66 @@
                 // 2. Image messages
                 if (msg.type === 'image') {
                     const fileSize = msg.fileSize ? `${(msg.fileSize / 1024).toFixed(1)} KB` : '';
+                    const reactions = renderReactions(msg);
                     return `
-                        <div class="flex ${isMine ? 'justify-end' : 'justify-start'} chat-message" data-message-id="${msg.id}" data-sender-id="${msg.userId}">
-                            <div class="max-w-xs md:max-w-md w-fit p-3 rounded-xl shadow-md ${isMine ? 'bg-orange-100 border-2 border-orange-300' : 'bg-white border-2 border-gray-200'}">
-                                <p class="text-xs font-semibold mb-2 ${userColor}">${displayName}</p>
-                                
-                                <div class="cursor-pointer image-message-thumbnail" data-image-url="${msg.imageUrl}" data-image-name="${msg.originalFileName}">
-                                    <img src="${msg.thumbnailUrl}" alt="${msg.originalFileName}" class="rounded-lg max-w-full h-auto shadow-sm" style="max-height: 300px; object-fit: cover;" loading="lazy" />
-                                </div>
-                                
-                                <p class="text-xs text-gray-600 mt-2 truncate" title="${msg.originalFileName}">
-                                    <i data-lucide="image" class="w-3 h-3 inline"></i>
-                                    ${msg.originalFileName}
-                                </p>
-                                ${fileSize ? `<p class="text-xs text-gray-500">${fileSize}</p>` : ''}
-                                
-                                <div class="flex items-center justify-end mt-1">
-                                    <p class="text-[10px] text-gray-400">
-                                        ${msg.timestamp ? new Date(msg.timestamp.toDate()).toLocaleTimeString() : '...'}
+                        <div class="flex ${isMine ? 'justify-end' : 'justify-start'} chat-message message-wrapper ${isMine ? 'message-mine' : ''}" data-message-id="${msg.id}" data-sender-id="${msg.userId}">
+                            <div class="max-w-xs md:max-w-md w-fit">
+                                <div class="p-3 rounded-xl shadow-md ${isMine ? 'bg-orange-100 border-2 border-orange-300' : 'bg-white border-2 border-gray-200'}">
+                                    <p class="text-xs font-semibold mb-2 ${userColor}">${displayName}</p>
+                                    
+                                    <div class="cursor-pointer image-message-thumbnail" data-image-url="${msg.imageUrl}" data-image-name="${msg.originalFileName}">
+                                        <img src="${msg.thumbnailUrl}" alt="${msg.originalFileName}" class="rounded-lg max-w-full h-auto shadow-sm" style="max-height: 300px; object-fit: cover;" loading="lazy" />
+                                    </div>
+                                    
+                                    <p class="text-xs text-gray-600 mt-2 truncate" title="${msg.originalFileName}">
+                                        <i data-lucide="image" class="w-3 h-3 inline"></i>
+                                        ${msg.originalFileName}
                                     </p>
-                                    ${readReceipt}
+                                    ${fileSize ? `<p class="text-xs text-gray-500">${fileSize}</p>` : ''}
+                                    
+                                    <div class="flex items-center justify-between mt-1">
+                                        <button class="reaction-trigger text-gray-400 hover:text-gray-600 text-xs p-1" data-message-id="${msg.id}">😊+</button>
+                                        <div class="flex items-center">
+                                            <p class="text-[10px] text-gray-400">
+                                                ${msg.timestamp ? new Date(msg.timestamp.toDate()).toLocaleTimeString() : '...'}
+                                            </p>
+                                            ${readReceipt}
+                                        </div>
+                                    </div>
                                 </div>
+                                ${reactions}
                             </div>
                         </div>
                     `;
                 }
 
                 // 3. User text messages
+                const reactions = renderReactions(msg);
                 return `
-                    <div class="flex ${isMine ? 'justify-end' : 'justify-start'} chat-message" data-message-id="${msg.id}" data-sender-id="${msg.userId}">
-                        <div class="max-w-xs md:max-w-md w-fit p-3 rounded-xl shadow-md ${isMine ? 'bg-orange-100 border-2 border-orange-300 cursor-pointer hover:shadow-lg transition-shadow' : 'bg-white border-2 border-gray-200'}">
-                            <p class="text-xs font-semibold mb-1 ${userColor}">${displayName}</p>
+                    <div class="flex ${isMine ? 'justify-end' : 'justify-start'} chat-message message-wrapper ${isMine ? 'message-mine' : ''}" data-message-id="${msg.id}" data-sender-id="${msg.userId}">
+                        <div class="max-w-xs md:max-w-md w-fit">
+                            <div class="p-3 rounded-xl shadow-md ${isMine ? 'bg-orange-100 border-2 border-orange-300 cursor-pointer hover:shadow-lg transition-shadow' : 'bg-white border-2 border-gray-200'} ${!isMine ? 'message-content' : ''}">
+                                <p class="text-xs font-semibold mb-1 ${userColor}">${displayName}</p>
 
-                            <p class="text-sm text-gray-700 italic border-b pb-1 mb-1">
-                                ${msg.originalText}
-                            </p>
-
-                            <p class="text-xl font-extrabold text-black">
-                                ${msg.sanskritText}
-                            </p>
-                            
-                            <div class="flex items-center justify-end mt-1">
-                                <p class="text-[10px] text-gray-400">
-                                    ${msg.timestamp ? new Date(msg.timestamp.toDate()).toLocaleTimeString() : '...'}
+                                <p class="text-sm text-gray-700 italic border-b pb-1 mb-1">
+                                    ${msg.originalText}
                                 </p>
-                                ${readReceipt}
+
+                                <p class="text-xl font-extrabold text-black">
+                                    ${msg.sanskritText}
+                                </p>
+                                
+                                <div class="flex items-center justify-between mt-1">
+                                    <button class="reaction-trigger text-gray-400 hover:text-gray-600 text-xs p-1" data-message-id="${msg.id}">😊+</button>
+                                    <div class="flex items-center">
+                                        <p class="text-[10px] text-gray-400">
+                                            ${msg.timestamp ? new Date(msg.timestamp.toDate()).toLocaleTimeString() : '...'}
+                                        </p>
+                                        ${readReceipt}
+                                    </div>
+                                </div>
                             </div>
+                            ${reactions}
                         </div>
                     </div>
                 `;
@@ -1405,7 +1753,15 @@
                 if (msg.type === 'user') {
                     const msgElement = list.querySelector(`[data-message-id="${msg.id}"]`);
                     if (msgElement && msg.userId === userId) {
-                        msgElement.addEventListener('click', () => showMessageInfo(msg));
+                        const messageContent = msgElement.querySelector('.message-content, .bg-orange-100');
+                        if (messageContent) {
+                            messageContent.addEventListener('click', (e) => {
+                                // Don't trigger if clicking on reaction trigger
+                                if (!e.target.closest('.reaction-trigger')) {
+                                    showMessageInfo(msg);
+                                }
+                            });
+                        }
                     }
                 } else if (msg.type === 'image') {
                     const msgElement = list.querySelector(`[data-message-id="${msg.id}"]`);
@@ -1420,6 +1776,69 @@
                         }
                     }
                 }
+            });
+
+            // Add event listeners for reaction triggers
+            list.querySelectorAll('.reaction-trigger').forEach(trigger => {
+                trigger.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const messageId = trigger.getAttribute('data-message-id');
+                    showEmojiPicker(messageId, trigger);
+                });
+            });
+
+            // Add event listeners for add reaction buttons
+            list.querySelectorAll('.add-reaction-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const messageId = btn.getAttribute('data-message-id');
+                    showEmojiPicker(messageId, btn);
+                });
+            });
+
+            // Add event listeners for existing reactions
+            list.querySelectorAll('.reaction-item').forEach(item => {
+                const emoji = item.getAttribute('data-emoji');
+                const userIds = item.getAttribute('data-user-ids').split(',').filter(id => id);
+                
+                // Click to toggle reaction
+                item.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const messageId = item.getAttribute('data-message-id');
+                    toggleReaction(messageId, emoji);
+                });
+                
+                // Hover to show tooltip
+                item.addEventListener('mouseenter', (e) => {
+                    showReactionTooltip(emoji, userIds, item);
+                });
+                
+                item.addEventListener('mouseleave', () => {
+                    hideReactionTooltip();
+                });
+            });
+
+            // Mobile long-press support for showing emoji picker
+            let longPressTimer;
+            list.querySelectorAll('.message-wrapper').forEach(wrapper => {
+                const messageId = wrapper.getAttribute('data-message-id');
+                
+                wrapper.addEventListener('touchstart', (e) => {
+                    longPressTimer = setTimeout(() => {
+                        wrapper.classList.add('long-press-active');
+                        const trigger = wrapper.querySelector('.reaction-trigger') || wrapper;
+                        showEmojiPicker(messageId, trigger);
+                        setTimeout(() => wrapper.classList.remove('long-press-active'), 300);
+                    }, 500);
+                });
+                
+                wrapper.addEventListener('touchend', () => {
+                    clearTimeout(longPressTimer);
+                });
+                
+                wrapper.addEventListener('touchmove', () => {
+                    clearTimeout(longPressTimer);
+                });
             });
 
             list.scrollTop = list.scrollHeight;
