@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Study Mentor</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://js.puter.com/v2/"></script>
     <script>
         // Configuration for MathJax to support LaTeX and mhchem for chemical formulas
         window.MathJax = {
@@ -280,109 +279,69 @@
             `;
         }
         
-        // --- API Interaction/Simulation (CRITICALLY FIXED FOR DEBUGGING) ---
+        // --- API Interaction using Groq and Cerebras via /api/translate ---
 
         /**
-         * Simulates a secure call to the Vercel Serverless Function.
+         * Calls the Vercel Serverless Function that uses Groq (primary) and Cerebras (fallback).
          * The prompt is sent, and the response is returned as text.
          */
         async function fetchAIResponse(prompt, retryCount = 0) {
             const maxRetries = 5;
             const delay = Math.pow(2, retryCount) * 1000; // Exponential backoff
 
-            // Prefer Puter.js in-browser AI to avoid server 500s and improve latency
-            const supportsPuterCreate = typeof window !== 'undefined' && window.puter && puter.ai && puter.ai.chat && puter.ai.chat.completions && typeof puter.ai.chat.completions.create === 'function';
-            const supportsPuterChatFn = typeof window !== 'undefined' && window.puter && puter.ai && typeof puter.ai.chat === 'function';
-            const withTimeout = (p, ms, label = 'Operation') => new Promise((resolve, reject) => {
-                const t = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
-                p.then(v => { clearTimeout(t); resolve(v); }, e => { clearTimeout(t); reject(e); });
-            });
-
-            const puterCreate = async (model) => {
-                const resp = await puter.ai.chat.completions.create({
-                    model,
-                    messages: [
-                        { role: 'system', content: 'You are a helpful study mentor. Be concise and follow the user formatting requirements exactly. Respond with plain text or JSON as requested.' },
-                        { role: 'user', content: prompt }
-                    ],
-                    temperature: 0.5
-                });
-                const text = resp?.choices?.[0]?.message?.content;
-                if (!text || typeof text !== 'string') throw new Error('Empty response from Puter model ' + model);
-                return text.trim();
-            };
-
-            const puterLegacy = async (model) => {
-                const res = await puter.ai.chat(`You are a helpful study mentor. Follow the instructions and output exactly as requested.\n\n${prompt}`, { model, temperature: 0.5 });
-                if (typeof res !== 'string' || !res.trim()) throw new Error('Empty response from Puter model ' + model);
-                return res.trim();
-            };
-
-            if (supportsPuterCreate || supportsPuterChatFn) {
-                try {
-                    const use = supportsPuterCreate ? puterCreate : puterLegacy;
-                    const primary = withTimeout(use('openrouter:grok-4-fast:free'), 20000, 'Puter primary');
-                    const delayedFallback = new Promise(resolve => setTimeout(resolve, 2000)).then(() => use('openrouter:meta-llama/llama-3.1-8b-instruct'));
-                    const result = await Promise.race([primary, delayedFallback]);
-                    return result;
-                } catch (e) {
-                    console.warn('Puter AI failed, falling back to server endpoint:', e?.message || e);
-                }
-            }
-
             try {
                 const response = await fetch(API_ENDPOINT, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ prompt: prompt })
+                    body: JSON.stringify({ 
+                        messages: [
+                            { role: 'system', content: 'You are a helpful study mentor. Be concise and follow the user formatting requirements exactly. Respond with plain text or JSON as requested.' },
+                            { role: 'user', content: prompt }
+                        ],
+                        temperature: 0.5
+                    })
                 });
 
                 if (!response.ok) {
-                    // CRITICAL: Read response as text for detailed error logging on 4xx/5xx
                     const errorText = await response.text().catch(() => 'No readable response body.');
                     console.error(`HTTP ERROR ${response.status}: ${response.statusText}. Raw Body: ${errorText}`);
                     throw new Error(`AI API returned error: Status ${response.status}. Raw response in console.`);
                 }
                 
-                // Attempt to parse JSON. Clone the response in case parsing fails 
-                // and we need to read the body as text again.
                 const clone = response.clone();
                 let data;
                 
                 try {
                     data = await response.json();
                 } catch (e) {
-                    // JSON parsing failed. Read the raw text body for the error message.
                     const rawText = await clone.text().catch(() => 'Could not read response body.');
                     console.error("JSON PARSE FAILURE. Raw body from API:", rawText);
                     throw new Error(`Failed to parse AI response as JSON. Check server logs/raw response in console.`);
                 }
 
-                // Try multiple common fields including 'sanskritText' if translate API is used
                 const aiContent = data.text || data.response || data.content || data.sanskritText;
 
                 if (typeof aiContent === 'string' && aiContent.trim().length > 0) {
+                    console.log(`AI Response from ${data.provider || 'unknown provider'}`);
                     return aiContent;
                 } else {
-                    // If response is OK and JSON parsed, but content field is missing/empty
                     console.error("AI JSON structure valid, but content field is missing:", data);
                     throw new Error("AI response content field ('text'/'response'/'content') is empty or missing.");
                 }
-
 
             } catch (error) {
                 const finalErrorMessage = error.message.includes('fetch') 
                     ? `Network/Server Error. Is Vercel function running? Error: ${error.message}` 
                     : error.message;
 
-                console.error(`Final Fetch Attempt Error:`, finalErrorMessage);
+                console.error(`Fetch Attempt Error:`, finalErrorMessage);
 
                 if (retryCount < maxRetries) {
-                    setLoading(true, `AI failed to respond. Retrying in ${delay / 1000}s. Check console for details...`);
+                    setLoading(true, `AI failed to respond. Retrying in ${delay / 1000}s (using Groq/Cerebras)...`);
                     await new Promise(resolve => setTimeout(resolve, delay));
                     return fetchAIResponse(prompt, retryCount + 1);
                 } else {
-                    throw new Error(`AI service unavailable after ${maxRetries} retries. ${finalErrorMessage}`);
+                    throw new Error(`AI service (Groq/Cerebras) unavailable after ${maxRetries} retries. ${finalErrorMessage}`);
                 }
             }
         }
