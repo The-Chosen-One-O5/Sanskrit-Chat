@@ -72,6 +72,15 @@
         .room-list-item:hover {
             background-color: #fffbeb; /* Light yellow hover */
         }
+        .image-message-thumbnail {
+            transition: transform 0.2s;
+        }
+        .image-message-thumbnail:hover {
+            transform: scale(1.02);
+        }
+        #drop-overlay {
+            backdrop-filter: blur(4px);
+        }
     </style>
 </head>
 <body class="app-container">
@@ -100,13 +109,14 @@
 
     <script type="module">
         // --- LUCIDE ICONS ---
-        import { createIcons, Search, MessageSquare, Plus, LogIn, Send, Copy, AlertTriangle, Check, CheckCheck, List, Zap, Trash2, X, Info } from 'https://esm.sh/lucide@latest';
-        const lucideIcons = { Search, MessageSquare, Plus, LogIn, Send, Copy, AlertTriangle, Check, CheckCheck, List, Zap, Trash2, X, Info };
+        import { createIcons, Search, MessageSquare, Plus, LogIn, Send, Copy, AlertTriangle, Check, CheckCheck, List, Zap, Trash2, X, Info, Image, Download, ZoomIn, ZoomOut } from 'https://esm.sh/lucide@latest';
+        const lucideIcons = { Search, MessageSquare, Plus, LogIn, Send, Copy, AlertTriangle, Check, CheckCheck, List, Zap, Trash2, X, Info, Image, Download, ZoomIn, ZoomOut };
 
         // --- FIREBASE SDKs ---
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, collection, addDoc, onSnapshot, serverTimestamp, query, orderBy, getDoc, setDoc, where, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
 
         // --- CONSTANTS ---
         // Vercel Serverless Function Endpoint for Translation
@@ -141,6 +151,7 @@
         
         let db;
         let auth;
+        let storage;
         let userId = null;
         let userName = '';
         let currentState = STATE.NAME_INPUT;
@@ -224,6 +235,7 @@
                 const app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
                 auth = getAuth(app);
+                storage = getStorage(app);
                 
                 await new Promise(resolve => {
                     onAuthStateChanged(auth, async (user) => {
@@ -587,6 +599,268 @@
             }
         }
 
+        // --- IMAGE SHARING FUNCTIONS ---
+
+        async function compressImage(file, maxWidth = 1920, quality = 0.85) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new window.Image();
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        let width = img.width;
+                        let height = img.height;
+
+                        if (width > maxWidth) {
+                            height = (height * maxWidth) / width;
+                            width = maxWidth;
+                        }
+
+                        canvas.width = width;
+                        canvas.height = height;
+
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, width, height);
+
+                        canvas.toBlob((blob) => {
+                            if (blob) {
+                                resolve(blob);
+                            } else {
+                                reject(new Error('Failed to compress image'));
+                            }
+                        }, file.type === 'image/png' ? 'image/png' : 'image/jpeg', quality);
+                    };
+                    img.onerror = () => reject(new Error('Failed to load image'));
+                    img.src = e.target.result;
+                };
+                reader.onerror = () => reject(new Error('Failed to read file'));
+                reader.readAsDataURL(file);
+            });
+        }
+
+        async function generateThumbnail(file, maxSize = 300) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new window.Image();
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        let width = img.width;
+                        let height = img.height;
+
+                        if (width > height) {
+                            if (width > maxSize) {
+                                height = (height * maxSize) / width;
+                                width = maxSize;
+                            }
+                        } else {
+                            if (height > maxSize) {
+                                width = (width * maxSize) / height;
+                                height = maxSize;
+                            }
+                        }
+
+                        canvas.width = width;
+                        canvas.height = height;
+
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, width, height);
+
+                        canvas.toBlob((blob) => {
+                            if (blob) {
+                                resolve(blob);
+                            } else {
+                                reject(new Error('Failed to generate thumbnail'));
+                            }
+                        }, 'image/jpeg', 0.7);
+                    };
+                    img.onerror = () => reject(new Error('Failed to load image for thumbnail'));
+                    img.src = e.target.result;
+                };
+                reader.onerror = () => reject(new Error('Failed to read file'));
+                reader.readAsDataURL(file);
+            });
+        }
+
+        async function uploadImageMessage(file) {
+            if (!file) return;
+
+            const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+            if (!validTypes.includes(file.type)) {
+                showError('Please select a valid image file (JPEG, PNG, WebP, or GIF)');
+                return;
+            }
+
+            const maxSize = 10 * 1024 * 1024;
+            if (file.size > maxSize) {
+                showError('Image file is too large. Maximum size is 10MB.');
+                return;
+            }
+
+            showLoading();
+
+            try {
+                const timestamp = Date.now();
+                const originalFileName = file.name;
+
+                const compressedBlob = await compressImage(file);
+                const thumbnailBlob = await generateThumbnail(file);
+
+                const imagePath = `rooms/${currentRoomCode}/images/${timestamp}-${userId}`;
+                const thumbnailPath = `rooms/${currentRoomCode}/images/thumbnails/${timestamp}-${userId}`;
+
+                const imageRef = ref(storage, imagePath);
+                const thumbnailRef = ref(storage, thumbnailPath);
+
+                await uploadBytes(imageRef, compressedBlob, {
+                    contentType: file.type,
+                    customMetadata: {
+                        originalFileName: originalFileName,
+                        uploadedBy: userId,
+                        userName: userName
+                    }
+                });
+
+                await uploadBytes(thumbnailRef, thumbnailBlob, {
+                    contentType: 'image/jpeg'
+                });
+
+                const imageUrl = await getDownloadURL(imageRef);
+                const thumbnailUrl = await getDownloadURL(thumbnailRef);
+
+                const messagesRef = collection(db, `artifacts/${appId}/public/data/sanskrit_rooms`, currentRoomCode, 'messages');
+
+                await addDoc(messagesRef, {
+                    type: 'image',
+                    imageUrl: imageUrl,
+                    thumbnailUrl: thumbnailUrl,
+                    originalFileName: originalFileName,
+                    fileSize: compressedBlob.size,
+                    userId: userId,
+                    userName: userName,
+                    timestamp: serverTimestamp(),
+                    readBy: {}
+                });
+
+                console.log('Image uploaded successfully');
+
+            } catch (e) {
+                console.error('Failed to upload image:', e);
+                showError(`Failed to upload image: ${e.message}`);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        function handleImageSelect(event) {
+            const file = event.target.files[0];
+            if (file) {
+                uploadImageMessage(file);
+            }
+            event.target.value = '';
+        }
+
+        function openImageLightbox(imageUrl, fileName) {
+            const modal = document.createElement('div');
+            modal.id = 'image-lightbox-modal';
+            modal.className = 'fixed inset-0 bg-black bg-opacity-90 flex justify-center items-center z-50';
+            
+            let scale = 1;
+            let translateX = 0;
+            let translateY = 0;
+            let isDragging = false;
+            let startX = 0;
+            let startY = 0;
+
+            modal.innerHTML = `
+                <div class="relative w-full h-full flex flex-col">
+                    <div class="absolute top-4 right-4 flex gap-2 z-10">
+                        <button id="zoom-out-btn" class="bg-white bg-opacity-80 hover:bg-opacity-100 text-black font-bold p-3 rounded-full shadow-lg transition">
+                            <i data-lucide="zoom-out" class="w-5 h-5"></i>
+                        </button>
+                        <button id="zoom-in-btn" class="bg-white bg-opacity-80 hover:bg-opacity-100 text-black font-bold p-3 rounded-full shadow-lg transition">
+                            <i data-lucide="zoom-in" class="w-5 h-5"></i>
+                        </button>
+                        <a id="download-image-btn" href="${imageUrl}" download="${fileName}" class="bg-blue-500 hover:bg-blue-600 text-white font-bold p-3 rounded-full shadow-lg transition flex items-center">
+                            <i data-lucide="download" class="w-5 h-5"></i>
+                        </a>
+                        <button id="close-lightbox-btn" class="bg-red-500 hover:bg-red-600 text-white font-bold p-3 rounded-full shadow-lg transition">
+                            <i data-lucide="x" class="w-6 h-6"></i>
+                        </button>
+                    </div>
+                    <div class="flex-1 flex justify-center items-center overflow-hidden p-4">
+                        <img id="lightbox-image" src="${imageUrl}" alt="${fileName}" class="max-w-full max-h-full object-contain cursor-move transition-transform" style="transform: scale(${scale}) translate(${translateX}px, ${translateY}px);" />
+                    </div>
+                    <div class="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-white bg-opacity-80 px-4 py-2 rounded-full">
+                        <p class="text-sm font-medium text-black">${fileName}</p>
+                    </div>
+                </div>
+            `;
+
+            document.body.appendChild(modal);
+            createIcons({ icons: lucideIcons });
+
+            const lightboxImage = document.getElementById('lightbox-image');
+
+            function updateTransform() {
+                lightboxImage.style.transform = `scale(${scale}) translate(${translateX}px, ${translateY}px)`;
+            }
+
+            document.getElementById('zoom-in-btn').addEventListener('click', () => {
+                scale = Math.min(scale + 0.25, 3);
+                updateTransform();
+            });
+
+            document.getElementById('zoom-out-btn').addEventListener('click', () => {
+                scale = Math.max(scale - 0.25, 0.5);
+                updateTransform();
+            });
+
+            document.getElementById('close-lightbox-btn').addEventListener('click', () => {
+                modal.remove();
+            });
+
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    modal.remove();
+                }
+            });
+
+            lightboxImage.addEventListener('mousedown', (e) => {
+                if (scale > 1) {
+                    isDragging = true;
+                    startX = e.clientX - translateX;
+                    startY = e.clientY - translateY;
+                    lightboxImage.style.cursor = 'grabbing';
+                }
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (isDragging) {
+                    translateX = e.clientX - startX;
+                    translateY = e.clientY - startY;
+                    updateTransform();
+                }
+            });
+
+            document.addEventListener('mouseup', () => {
+                if (isDragging) {
+                    isDragging = false;
+                    lightboxImage.style.cursor = 'move';
+                }
+            });
+
+            lightboxImage.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                if (e.deltaY < 0) {
+                    scale = Math.min(scale + 0.1, 3);
+                } else {
+                    scale = Math.max(scale - 0.1, 0.5);
+                }
+                updateTransform();
+            });
+        }
+
         // --- READ RECEIPTS LOGIC ---
 
         async function markMessageAsRead(messageId) {
@@ -939,16 +1213,26 @@
                 
                 ${deleteButtonHtml}
 
-                <div id="messages-list" class="chat-message-container space-y-4 p-2">
+                <div id="messages-list" class="chat-message-container space-y-4 p-2" style="position: relative;">
                     <div class="text-center text-gray-500 pt-8" id="empty-state">
                         Start your conversation in English or Hinglish!
+                    </div>
+                    <div id="drop-overlay" class="hidden fixed inset-0 bg-blue-500 bg-opacity-20 border-4 border-dashed border-blue-500 flex justify-center items-center z-40 pointer-events-none">
+                        <div class="bg-white p-6 rounded-xl shadow-2xl">
+                            <i data-lucide="image" class="w-16 h-16 mx-auto text-blue-500 mb-2"></i>
+                            <p class="text-xl font-bold text-gray-800">Drop image here to upload</p>
+                        </div>
                     </div>
                 </div>
 
                 <div class="mt-6">
-                    <form id="message-form" class="flex">
-                        <input type="text" id="message-input" placeholder="Type your English/Hinglish message..." class="flex-grow p-3 border border-gray-300 rounded-l-lg focus:ring-yellow-500 focus:border-yellow-500" required>
-                        <button type="submit" class="bg-yellow-500 hover:bg-yellow-600 text-black font-bold py-3 px-4 rounded-r-lg transition duration-200 flex items-center">
+                    <form id="message-form" class="flex gap-2">
+                        <input type="text" id="message-input" placeholder="Type your English/Hinglish message..." class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-yellow-500 focus:border-yellow-500" required>
+                        <input type="file" id="image-input" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden">
+                        <button type="button" id="image-upload-btn" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-4 rounded-lg transition duration-200 flex items-center">
+                            <i data-lucide="image" class="w-5 h-5"></i>
+                        </button>
+                        <button type="submit" class="bg-yellow-500 hover:bg-yellow-600 text-black font-bold py-3 px-4 rounded-lg transition duration-200 flex items-center">
                             <i data-lucide="send" class="w-5 h-5"></i>
                         </button>
                     </form>
@@ -966,6 +1250,49 @@
                 const input = document.getElementById('message-input');
                 translateAndSendMessage(input.value);
             });
+
+            document.getElementById('image-upload-btn').addEventListener('click', () => {
+                document.getElementById('image-input').click();
+            });
+
+            document.getElementById('image-input').addEventListener('change', handleImageSelect);
+
+            const dropOverlay = document.getElementById('drop-overlay');
+            const appContainer = document.getElementById('app');
+
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                appContainer.addEventListener(eventName, preventDefaults, false);
+            });
+
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+
+            ['dragenter', 'dragover'].forEach(eventName => {
+                appContainer.addEventListener(eventName, () => {
+                    dropOverlay.classList.remove('hidden');
+                }, false);
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                appContainer.addEventListener(eventName, () => {
+                    dropOverlay.classList.add('hidden');
+                }, false);
+            });
+
+            appContainer.addEventListener('drop', (e) => {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                if (files.length > 0) {
+                    const file = files[0];
+                    if (file.type.startsWith('image/')) {
+                        uploadImageMessage(file);
+                    } else {
+                        showError('Please drop an image file');
+                    }
+                }
+            }, false);
             
             // Host deletion logic setup
             if (isHost) {
@@ -1012,7 +1339,6 @@
                     `;
                 }
 
-                // 2. User messages
                 const isMine = msg.userId === userId;
                 const displayName = isMine ? 'You' : msg.userName || 'Guest'; 
                 const userColor = isMine ? 'text-orange-500' : 'text-blue-500';
@@ -1021,6 +1347,36 @@
                 const statusIcon = getReadStatusIcon(status);
                 const readReceipt = isMine && statusIcon ? `<span class="inline-block ml-1">${statusIcon}</span>` : '';
 
+                // 2. Image messages
+                if (msg.type === 'image') {
+                    const fileSize = msg.fileSize ? `${(msg.fileSize / 1024).toFixed(1)} KB` : '';
+                    return `
+                        <div class="flex ${isMine ? 'justify-end' : 'justify-start'} chat-message" data-message-id="${msg.id}" data-sender-id="${msg.userId}">
+                            <div class="max-w-xs md:max-w-md w-fit p-3 rounded-xl shadow-md ${isMine ? 'bg-orange-100 border-2 border-orange-300' : 'bg-white border-2 border-gray-200'}">
+                                <p class="text-xs font-semibold mb-2 ${userColor}">${displayName}</p>
+                                
+                                <div class="cursor-pointer image-message-thumbnail" data-image-url="${msg.imageUrl}" data-image-name="${msg.originalFileName}">
+                                    <img src="${msg.thumbnailUrl}" alt="${msg.originalFileName}" class="rounded-lg max-w-full h-auto shadow-sm" style="max-height: 300px; object-fit: cover;" loading="lazy" />
+                                </div>
+                                
+                                <p class="text-xs text-gray-600 mt-2 truncate" title="${msg.originalFileName}">
+                                    <i data-lucide="image" class="w-3 h-3 inline"></i>
+                                    ${msg.originalFileName}
+                                </p>
+                                ${fileSize ? `<p class="text-xs text-gray-500">${fileSize}</p>` : ''}
+                                
+                                <div class="flex items-center justify-end mt-1">
+                                    <p class="text-[10px] text-gray-400">
+                                        ${msg.timestamp ? new Date(msg.timestamp.toDate()).toLocaleTimeString() : '...'}
+                                    </p>
+                                    ${readReceipt}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                // 3. User text messages
                 return `
                     <div class="flex ${isMine ? 'justify-end' : 'justify-start'} chat-message" data-message-id="${msg.id}" data-sender-id="${msg.userId}">
                         <div class="max-w-xs md:max-w-md w-fit p-3 rounded-xl shadow-md ${isMine ? 'bg-orange-100 border-2 border-orange-300 cursor-pointer hover:shadow-lg transition-shadow' : 'bg-white border-2 border-gray-200'}">
@@ -1050,6 +1406,18 @@
                     const msgElement = list.querySelector(`[data-message-id="${msg.id}"]`);
                     if (msgElement && msg.userId === userId) {
                         msgElement.addEventListener('click', () => showMessageInfo(msg));
+                    }
+                } else if (msg.type === 'image') {
+                    const msgElement = list.querySelector(`[data-message-id="${msg.id}"]`);
+                    if (msgElement) {
+                        const imageContainer = msgElement.querySelector('[data-image-url]');
+                        if (imageContainer) {
+                            imageContainer.addEventListener('click', () => {
+                                const imageUrl = imageContainer.getAttribute('data-image-url');
+                                const imageName = imageContainer.getAttribute('data-image-name');
+                                openImageLightbox(imageUrl, imageName);
+                            });
+                        }
                     }
                 }
             });
